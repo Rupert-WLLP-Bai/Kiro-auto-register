@@ -1,20 +1,21 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { 
-  Play, 
-  Square, 
-  Upload, 
-  Trash2, 
-  Copy, 
-  CheckCircle, 
-  XCircle, 
-  Clock, 
+import {
+  Play,
+  Square,
+  Upload,
+  Trash2,
+  Copy,
+  CheckCircle,
+  XCircle,
+  Clock,
   Loader2,
   Mail,
   Key,
   RefreshCw,
   AlertCircle,
   Terminal,
-  Zap
+  Zap,
+  Download
 } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'

@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { useAccountsStore } from '@/store/accounts'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui'
-import { Users, CheckCircle, AlertTriangle, Clock, Zap, Shield, Fingerprint, FolderPlus, Tag, TrendingUp, Activity, BarChart3 } from 'lucide-react'
+import { Button } from '../ui/button'
+import { Users, CheckCircle, AlertTriangle, Clock, Zap, Shield, Fingerprint, FolderPlus, Tag, TrendingUp, Activity, BarChart3, Download } from 'lucide-react'
 import kiroLogo from '@/assets/kiro-high-resolution-logo-transparent.png'
 import { cn } from '@/lib/utils'
 
@@ -21,6 +22,39 @@ const getSubscriptionColor = (type: string, title?: string): string => {
 export function HomePage() {
   const { accounts, getStats, darkMode } = useAccountsStore()
   const stats = getStats()
+
+  // 导出账号到文件
+  const handleExportAccounts = async () => {
+    const accountList = Array.from(accounts.values())
+
+    if (accountList.length === 0) {
+      alert('没有可导出的账号')
+      return
+    }
+
+    // 格式: 邮箱|密码
+    // 密码固定为 admin123456aA!
+    const exportText = accountList
+      .map(acc => `${acc.email}|admin123456aA!`)
+      .join('\n')
+
+    try {
+      // 生成文件名（带时间戳）
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
+      const filename = `kiro-accounts-${timestamp}.txt`
+
+      // 写入文件到当前目录
+      const result = await window.api.writeFile(filename, exportText)
+
+      if (result.success) {
+        alert(`成功导出 ${accountList.length} 个账号到文件: ${filename}`)
+      } else {
+        alert(`导出失败: ${result.error}`)
+      }
+    } catch (error) {
+      alert(`导出失败: ${error}`)
+    }
+  }
 
   // 计算额度统计
   const usageStats = useMemo(() => {
@@ -93,16 +127,22 @@ export function HomePage() {
       <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 p-6 border border-primary/20">
         <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary/20 to-transparent rounded-full blur-2xl" />
         <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-primary/20 to-transparent rounded-full blur-2xl" />
-        <div className="relative flex items-center gap-4">
-          <img 
-            src={kiroLogo} 
-            alt="Kiro" 
-            className={cn("h-14 w-auto transition-all", darkMode && "invert brightness-0")} 
-          />
-          <div>
-            <h1 className="text-2xl font-bold text-primary">欢迎使用 Kiro 账户管理器</h1>
-            <p className="text-muted-foreground">管理你的 Kiro IDE 账号，一键切换，高效开发</p>
+        <div className="relative flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <img
+              src={kiroLogo}
+              alt="Kiro"
+              className={cn("h-14 w-auto transition-all", darkMode && "invert brightness-0")}
+            />
+            <div>
+              <h1 className="text-2xl font-bold text-primary">欢迎使用 Kiro 账户管理器</h1>
+              <p className="text-muted-foreground">管理你的 Kiro IDE 账号，一键切换，高效开发</p>
+            </div>
           </div>
+          <Button onClick={handleExportAccounts} disabled={stats.total === 0} variant="outline">
+            <Download className="w-4 h-4 mr-2" />
+            导出账号
+          </Button>
         </div>
       </div>
 
