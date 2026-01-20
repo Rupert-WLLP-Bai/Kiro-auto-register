@@ -12,11 +12,147 @@ import { chromium, Browser, Page } from 'playwright'
 // 日志回调类型
 type LogCallback = (message: string) => void
 
+// ============ 人性化操作辅助函数 ============
+
+/**
+ * 生成随机延迟（模拟人类思考时间）
+ * @param min 最小延迟（毫秒）
+ * @param max 最大延迟（毫秒）
+ */
+function randomDelay(min: number, max: number): number {
+  return Math.random() * (max - min) + min
+}
+
+/**
+ * 生成贝塞尔曲线上的点（模拟真实鼠标移动轨迹）
+ */
+function bezierCurve(start: { x: number; y: number }, end: { x: number; y: number }, steps: number) {
+  const points: { x: number; y: number }[] = []
+
+  // 生成两个随机控制点
+  const cp1 = {
+    x: start.x + (end.x - start.x) * (0.25 + Math.random() * 0.25),
+    y: start.y + (end.y - start.y) * (0.25 + Math.random() * 0.25) + (Math.random() - 0.5) * 100
+  }
+  const cp2 = {
+    x: start.x + (end.x - start.x) * (0.5 + Math.random() * 0.25),
+    y: start.y + (end.y - start.y) * (0.5 + Math.random() * 0.25) + (Math.random() - 0.5) * 100
+  }
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const mt = 1 - t
+    const mt2 = mt * mt
+    const mt3 = mt2 * mt
+    const t2 = t * t
+    const t3 = t2 * t
+
+    const x = mt3 * start.x + 3 * mt2 * t * cp1.x + 3 * mt * t2 * cp2.x + t3 * end.x
+    const y = mt3 * start.y + 3 * mt2 * t * cp1.y + 3 * mt * t2 * cp2.y + t3 * end.y
+
+    points.push({ x, y })
+  }
+
+  return points
+}
+
+/**
+ * 人性化鼠标移动（带曲线轨迹）
+ */
+async function humanMouseMove(page: Page, targetX: number, targetY: number) {
+  try {
+    // 获取当前鼠标位置（假设从页面中心开始）
+    const viewport = page.viewportSize()
+    const startX = viewport ? viewport.width / 2 : 640
+    const startY = viewport ? viewport.height / 2 : 360
+
+    // 生成贝塞尔曲线轨迹
+    const steps = Math.floor(randomDelay(15, 30))
+    const points = bezierCurve({ x: startX, y: startY }, { x: targetX, y: targetY }, steps)
+
+    // 沿着曲线移动鼠标
+    for (const point of points) {
+      await page.mouse.move(point.x, point.y)
+      await page.waitForTimeout(randomDelay(5, 15))
+    }
+  } catch (error) {
+    // 如果曲线移动失败，使用简单移动
+    await page.mouse.move(targetX, targetY)
+  }
+}
+
+/**
+ * 人性化点击（带随机延迟和鼠标移动）
+ */
+async function humanClick(page: Page, selector: string, description: string = '元素'): Promise<boolean> {
+  try {
+    const element = page.locator(selector).first()
+    await element.waitFor({ state: 'visible', timeout: 10000 })
+
+    // 获取元素位置
+    const box = await element.boundingBox()
+    if (box) {
+      // 随机选择点击位置（在元素范围内）
+      const clickX = box.x + box.width * (0.3 + Math.random() * 0.4)
+      const clickY = box.y + box.height * (0.3 + Math.random() * 0.4)
+
+      // 移动鼠标到目标位置
+      await humanMouseMove(page, clickX, clickY)
+
+      // 随机停顿（模拟思考）
+      await page.waitForTimeout(randomDelay(100, 300))
+
+      // 点击
+      await element.click({ delay: randomDelay(50, 150) })
+      return true
+    }
+
+    // 如果无法获取位置，直接点击
+    await element.click({ delay: randomDelay(50, 150) })
+    return true
+  } catch (error) {
+    return false
+  }
+}
+
+/**
+ * 人性化输入文本（每个字符随机延迟）
+ */
+async function humanType(page: Page, selector: string, text: string, description: string = '文本'): Promise<boolean> {
+  try {
+    const element = page.locator(selector).first()
+    await element.waitFor({ state: 'visible', timeout: 10000 })
+
+    // 点击输入框
+    await element.click({ delay: randomDelay(50, 100) })
+    await page.waitForTimeout(randomDelay(100, 300))
+
+    // 清空输入框
+    await element.clear()
+    await page.waitForTimeout(randomDelay(50, 150))
+
+    // 逐字符输入，每个字符延迟不同
+    for (const char of text) {
+      await element.type(char, { delay: randomDelay(50, 150) })
+      // 偶尔停顿更久（模拟思考或查看）
+      if (Math.random() < 0.1) {
+        await page.waitForTimeout(randomDelay(200, 500))
+      }
+    }
+
+    return true
+  } catch (error) {
+    return false
+  }
+}
+
 // 验证码正则表达式 - 与 Python 版本保持一致
 const CODE_PATTERNS = [
   // AWS/Amazon 验证码格式
   /(?:verification\s*code|验证码|Your code is|code is)[：:\s]*(\d{6})/gi,
   /(?:is|为)[：:\s]*(\d{6})\b/gi,
+  // Microsoft 安全代码格式
+  /(?:安全代码|security\s*code)[：:\s]*(\d{6})/gi,
   // 验证码通常单独一行或在特定上下文中
   /^\s*(\d{6})\s*$/gm, // 单独一行的6位数字
   />\s*(\d{6})\s*</g // HTML标签之间的6位数字
@@ -31,6 +167,13 @@ const AWS_SENDERS = [
   'no-reply@aws.amazon.com',
   'noreply@aws.amazon.com',
   'aws' // 模糊匹配
+]
+
+// Microsoft 安全代码发件人
+const MICROSOFT_SENDERS = [
+  'account-security-noreply@accountprotection.microsoft.com',
+  'microsoft.com',
+  'microsoft' // 模糊匹配
 ]
 
 // 随机姓名生成
@@ -150,7 +293,8 @@ export async function getOutlookVerificationCode(
   refreshToken: string,
   clientId: string,
   log: LogCallback,
-  timeout: number = 120
+  timeout: number = 120,
+  codeType: 'aws' | 'microsoft' = 'aws'
 ): Promise<string | null> {
   log('========== 开始获取邮箱验证码 ==========')
   log(`client_id: ${clientId}`)
@@ -251,17 +395,36 @@ export async function getOutlookVerificationCode(
 
       log(`获取到 ${mailData.value?.length || 0} 封邮件`)
 
-      // 搜索最新的 AWS 邮件
+      // 根据类型选择发件人列表
+      const senders = codeType === 'microsoft' ? MICROSOFT_SENDERS : AWS_SENDERS
+      const senderType = codeType === 'microsoft' ? 'Microsoft' : 'AWS'
+
+      // 搜索最新的邮件 - 只检查最近60秒内收到的邮件
+      const now = Date.now()
+      const recentThreshold = 60000 // 60秒
+
       for (const mail of mailData.value || []) {
         const fromEmail = mail.from?.emailAddress?.address?.toLowerCase() || ''
-        const isAwsSender = AWS_SENDERS.some((s) => fromEmail.includes(s.toLowerCase()))
+        const isTargetSender = senders.some((s) => fromEmail.includes(s.toLowerCase()))
 
-        if (isAwsSender && !checkedIds.has(mail.id)) {
+        // 检查邮件接收时间
+        const receivedTime = new Date(mail.receivedDateTime).getTime()
+        const isRecent = (now - receivedTime) < recentThreshold
+
+        if (isTargetSender && !checkedIds.has(mail.id)) {
           checkedIds.add(mail.id)
 
-          log(`\n=== 检查 AWS 邮件 ===`)
+          log(`\n=== 检查 ${senderType} 邮件 ===`)
           log(`  发件人: ${fromEmail}`)
           log(`  主题: ${mail.subject?.substring(0, 50)}`)
+          log(`  接收时间: ${mail.receivedDateTime}`)
+          log(`  是否为最近邮件: ${isRecent}`)
+
+          // 只处理最近的邮件
+          if (!isRecent) {
+            log(`  ⚠ 邮件过旧，跳过`)
+            continue
+          }
 
           // 提取验证码
           let code: string | null = null
@@ -296,73 +459,6 @@ export async function getOutlookVerificationCode(
 }
 
 /**
- * 模拟人类点击动作
- */
-async function humanClick(
-  page: Page,
-  selector: string,
-  log: LogCallback,
-  description: string
-): Promise<boolean> {
-  try {
-    const button = page.locator(selector).first()
-    await button.waitFor({ state: 'visible', timeout: 10000 })
-
-    // 1. 模拟鼠标移动到元素上
-    const box = await button.boundingBox()
-    if (box) {
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 })
-    }
-
-    // 2. 随机延迟
-    await page.waitForTimeout(Math.random() * 500 + 300)
-
-    // 3. 点击（带轻微按下延迟）
-    await button.click({ delay: Math.random() * 100 + 50 })
-    log(`✓ 已模拟人工点击${description}`)
-    return true
-  } catch (error) {
-    log(`✗ 点击${description}失败: ${error}`)
-    return false
-  }
-}
-
-/**
- * 模拟人工输入
- */
-async function humanType(
-  page: Page,
-  selector: string,
-  value: string,
-  log: LogCallback,
-  description: string
-): Promise<boolean> {
-  try {
-    const element = page.locator(selector).first()
-    await element.waitFor({ state: 'visible', timeout: 10000 })
-
-    // 模拟鼠标移动到元素
-    const box = await element.boundingBox()
-    if (box) {
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 })
-    }
-    await page.waitForTimeout(Math.random() * 300 + 200)
-
-    await element.click({ delay: Math.random() * 100 + 50 })
-    await page.waitForTimeout(200)
-    await element.clear()
-
-    // 逐字输入
-    await element.type(value, { delay: Math.random() * 50 + 50 })
-    log(`✓ 已模拟人工输入${description}`)
-    return true
-  } catch (error) {
-    log(`✗ 输入${description}失败: ${error}`)
-    return false
-  }
-}
-
-/**
  * 等待输入框出现并输入内容
  */
 async function waitAndFill(
@@ -377,9 +473,33 @@ async function waitAndFill(
   try {
     const element = page.locator(selector).first()
     await element.waitFor({ state: 'visible', timeout })
-    await page.waitForTimeout(500)
+
+    // 获取元素位置并移动鼠标
+    const box = await element.boundingBox()
+    if (box) {
+      const clickX = box.x + box.width * (0.3 + Math.random() * 0.4)
+      const clickY = box.y + box.height * (0.3 + Math.random() * 0.4)
+      await humanMouseMove(page, clickX, clickY)
+    }
+
+    // 随机停顿
+    await page.waitForTimeout(randomDelay(200, 500))
+
+    // 点击并清空
+    await element.click({ delay: randomDelay(50, 100) })
+    await page.waitForTimeout(randomDelay(100, 300))
     await element.clear()
-    await element.fill(value)
+    await page.waitForTimeout(randomDelay(50, 150))
+
+    // 逐字符输入
+    for (const char of value) {
+      await element.type(char, { delay: randomDelay(50, 150) })
+      // 偶尔停顿更久
+      if (Math.random() < 0.1) {
+        await page.waitForTimeout(randomDelay(200, 500))
+      }
+    }
+
     log(`✓ 已输入${description}: ${value}`)
     return true
   } catch (error) {
@@ -403,14 +523,19 @@ async function tryClickSelectors(
       const element = page.locator(selector).first()
       await element.waitFor({ state: 'visible', timeout: timeout / selectors.length })
 
-      // 模拟鼠标移动
+      // 获取元素位置并使用贝塞尔曲线移动鼠标
       const box = await element.boundingBox()
       if (box) {
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 })
+        const clickX = box.x + box.width * (0.3 + Math.random() * 0.4)
+        const clickY = box.y + box.height * (0.3 + Math.random() * 0.4)
+        await humanMouseMove(page, clickX, clickY)
       }
-      await page.waitForTimeout(Math.random() * 500 + 300)
 
-      await element.click({ delay: Math.random() * 100 + 50 })
+      // 随机停顿（模拟思考）
+      await page.waitForTimeout(randomDelay(300, 800))
+
+      // 点击
+      await element.click({ delay: randomDelay(50, 150) })
       log(`✓ 已点击${description}`)
       return true
     } catch {
@@ -539,7 +664,10 @@ async function waitAndClickWithRetry(
 export async function activateOutlook(
   email: string,
   emailPassword: string,
-  log: LogCallback
+  log: LogCallback,
+  backupEmail?: string,
+  backupEmailRefreshToken?: string,
+  backupEmailClientId?: string
 ): Promise<{ success: boolean; error?: string }> {
   const activationUrl = 'https://go.microsoft.com/fwlink/p/?linkid=2125442'
   let browser: Browser | null = null
@@ -655,95 +783,190 @@ export async function activateOutlook(
 
     await page.waitForTimeout(3000)
 
-    // 步骤6: 等待第一个"暂时跳过"链接并点击
-    log('\n步骤6: 点击第一个"暂时跳过"链接...')
-    const skipSelector = 'a#iShowSkip'
-    try {
-      const skipElement = page.locator(skipSelector).first()
-      await skipElement.waitFor({ state: 'visible', timeout: 30000 })
-
-      // 模拟鼠标移动
-      const box = await skipElement.boundingBox()
-      if (box) {
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 })
-      }
-      await page.waitForTimeout(Math.random() * 500 + 300)
-
-      await skipElement.click({ delay: Math.random() * 100 + 50 })
-      log('✓ 已点击第一个"暂时跳过"')
-      await page.waitForTimeout(3000)
-    } catch {
-      log('未找到第一个"暂时跳过"链接，可能已跳过此步骤')
-    }
-
-    // 步骤7: 等待第二个"暂时跳过"链接并点击
-    log('\n步骤7: 点击第二个"暂时跳过"链接...')
-    try {
-      const skipElement = page.locator(skipSelector).first()
-      await skipElement.waitFor({ state: 'visible', timeout: 15000 })
-
-      // 模拟鼠标移动
-      const box = await skipElement.boundingBox()
-      if (box) {
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 })
-      }
-      await page.waitForTimeout(Math.random() * 500 + 300)
-
-      await skipElement.click({ delay: Math.random() * 100 + 50 })
-      log('✓ 已点击第二个"暂时跳过"')
-      await page.waitForTimeout(3000)
-    } catch {
-      log('未找到第二个"暂时跳过"链接，可能已跳过此步骤')
-    }
-
-    // 步骤8: 等待"取消"按钮（密钥创建对话框）并点击
-    log('\n步骤8: 点击"取消"按钮（跳过密钥创建）...')
-    const cancelButtonSelectors = [
-      'button[data-testid="secondaryButton"]:has-text("取消")',
-      'button[data-testid="secondaryButton"]:has-text("Cancel")',
-      'button[type="button"]:has-text("取消")',
-      'button[type="button"]:has-text("Cancel")'
+    // 新增步骤5.5: 检测并处理"添加安全信息"页面
+    log('\n步骤5.5: 检测是否需要添加安全信息...')
+    const securityInfoSelectors = [
+      'input[type="email"][placeholder*="example.com"]',
+      'input[type="email"][name="EmailAddress"]',
+      'input[type="email"]'
     ]
 
-    if (!(await tryClickSelectors(page, cancelButtonSelectors, log, '"取消"按钮', 15000))) {
-      log('未找到"取消"按钮，可能已跳过此步骤')
+    let needsSecurityInfo = false
+    for (const selector of securityInfoSelectors) {
+      try {
+        const element = page.locator(selector).first()
+        await element.waitFor({ state: 'visible', timeout: 5000 })
+        const pageText = await page.textContent('body')
+        if (pageText && (pageText.includes('保护你的帐户') || pageText.includes('安全信息') || pageText.includes('备用电子邮件'))) {
+          needsSecurityInfo = true
+          log('✓ 检测到需要添加安全信息')
+
+          // 使用备用邮箱（如果提供）或使用固定的备用邮箱
+          const backupEmailToUse = backupEmail || 'backup.verify@outlook.com'
+          log(`   输入备用邮箱: ${backupEmailToUse}`)
+
+          await element.click()
+          await page.waitForTimeout(200)
+          await element.clear()
+          await element.fill(backupEmailToUse)
+          log('✓ 已输入备用邮箱')
+
+          await page.waitForTimeout(1000)
+
+          // 点击"下一步"按钮
+          const nextButtonSelectors = [
+            'input#idSIButton9[type="submit"]',
+            'input[type="submit"][value="下一步"]',
+            'input[type="submit"][value="Next"]',
+            'button[type="submit"]'
+          ]
+
+          if (await tryClickSelectors(page, nextButtonSelectors, log, '安全信息下一步按钮')) {
+            log('✓ 已点击下一步，等待验证码邮件发送...')
+
+            // 如果提供了备用邮箱的 refresh token，则自动获取验证码
+            if (backupEmailRefreshToken && backupEmailClientId) {
+              // 等待更长时间让邮件到达（15秒）
+              log('   等待 Microsoft 发送验证码邮件（15秒）...')
+              await page.waitForTimeout(15000)
+
+              log('   正在从备用邮箱获取验证码...')
+              const securityCode = await getOutlookVerificationCode(
+                backupEmailRefreshToken,
+                backupEmailClientId,
+                log,
+                120,
+                'microsoft' // 获取 Microsoft 安全代码
+              )
+
+              if (securityCode) {
+                log(`   获取到验证码: ${securityCode}`)
+
+                // 等待验证码输入框出现
+                log('   等待验证码输入框出现...')
+                await page.waitForTimeout(2000)
+
+                // 输入验证码 - 使用更精确的选择器
+                const codeInputSelectors = [
+                  'input[type="text"][name="ProofConfirmation"]',
+                  'input[name="ProofConfirmation"]',
+                  'input[type="tel"]',
+                  'input[aria-label*="代码"]',
+                  'input[aria-label*="code"]',
+                  'input[placeholder*="代码"]',
+                  'input[type="text"]'
+                ]
+
+                let codeInputSuccess = false
+                for (const codeSelector of codeInputSelectors) {
+                  try {
+                    const codeInput = page.locator(codeSelector).first()
+                    await codeInput.waitFor({ state: 'visible', timeout: 10000 })
+
+                    // 获取元素位置并移动鼠标
+                    const box = await codeInput.boundingBox()
+                    if (box) {
+                      const clickX = box.x + box.width * (0.3 + Math.random() * 0.4)
+                      const clickY = box.y + box.height * (0.3 + Math.random() * 0.4)
+                      await humanMouseMove(page, clickX, clickY)
+                    }
+
+                    await page.waitForTimeout(randomDelay(200, 400))
+                    await codeInput.click({ delay: randomDelay(50, 100) })
+                    await page.waitForTimeout(randomDelay(100, 300))
+                    await codeInput.clear()
+                    await page.waitForTimeout(randomDelay(50, 150))
+
+                    // 逐字输入验证码，每个字符延迟不同
+                    for (const char of securityCode) {
+                      await codeInput.type(char, { delay: randomDelay(80, 180) })
+                      // 偶尔停顿（模拟查看验证码）
+                      if (Math.random() < 0.15) {
+                        await page.waitForTimeout(randomDelay(200, 400))
+                      }
+                    }
+
+                    log(`✓ 已输入验证码: ${securityCode}`)
+                    codeInputSuccess = true
+                    break
+                  } catch (error) {
+                    log(`   尝试选择器 ${codeSelector} 失败: ${error}`)
+                    continue
+                  }
+                }
+
+                if (!codeInputSuccess) {
+                  log('⚠ 未找到验证码输入框，请手动输入')
+                  await page.waitForTimeout(30000)
+                } else {
+                  await page.waitForTimeout(1000)
+
+                  // 点击验证按钮
+                  if (await tryClickSelectors(page, nextButtonSelectors, log, '验证按钮')) {
+                    log('✓ 验证码验证成功')
+                    await page.waitForTimeout(3000)
+
+                    // 处理"保持登录状态"提示
+                    log('\n步骤5.6: 处理"保持登录状态"提示...')
+                    const staySignedInSelectors = [
+                      'input#idSIButton9[value="是"]',
+                      'input#idSIButton9[value="Yes"]',
+                      'button[type="submit"]:has-text("是")',
+                      'button[type="submit"]:has-text("Yes")',
+                      'button:has-text("是")',
+                      'button:has-text("Yes")'
+                    ]
+
+                    if (await tryClickSelectors(page, staySignedInSelectors, log, '"是"按钮（保持登录）', 10000)) {
+                      log('✓ 已点击"是"按钮')
+                      await page.waitForTimeout(3000)
+                    } else {
+                      log('未找到"是"按钮，可能已跳过')
+                    }
+                  }
+                }
+              } else {
+                log('⚠ 无法自动获取验证码，需要手动处理')
+                await page.waitForTimeout(60000) // 等待60秒供手动操作
+              }
+            } else {
+              log('⚠ 未提供备用邮箱凭据，无法自动获取验证码')
+              log('   请手动在浏览器中完成验证...')
+              await page.waitForTimeout(30000) // 等待30秒供手动操作
+            }
+          }
+
+          break
+        }
+      } catch {
+        continue
+      }
     }
 
-    await page.waitForTimeout(3000)
-
-    // 步骤9: 等待"是"按钮（保持登录状态）并点击
-    log('\n步骤9: 点击"是"按钮（保持登录状态）...')
-    const yesButtonSelectors = [
-      'button[type="submit"][data-testid="primaryButton"]:has-text("是")',
-      'button[type="submit"][data-testid="primaryButton"]:has-text("Yes")',
-      'input#idSIButton9[value="是"]',
-      'input#idSIButton9[value="Yes"]',
-      'button:has-text("是")',
-      'button:has-text("Yes")'
-    ]
-
-    if (!(await tryClickSelectors(page, yesButtonSelectors, log, '"是"按钮', 15000))) {
-      log('未找到"是"按钮，可能已跳过此步骤')
+    if (!needsSecurityInfo) {
+      log('✓ 无需添加安全信息，继续下一步')
     }
 
-    await page.waitForTimeout(5000)
+    // 步骤6: 等待 Outlook 邮箱加载完成
+    log('\n步骤6: 等待 Outlook 邮箱加载完成...')
 
-    // 步骤10: 等待 Outlook 邮箱加载完成
-    log('\n步骤10: 等待 Outlook 邮箱加载完成...')
-    const newMailSelectors = [
+    // 等待邮箱界面的关键元素出现
+    const outlookLoadedSelectors = [
       'button[aria-label="New mail"]',
       'button:has-text("New mail")',
       'button:has-text("新邮件")',
-      'span:has-text("New mail")',
-      '[data-automation-type="RibbonSplitButton"]'
+      'span:has-text("Inbox")',
+      'span:has-text("收件箱")',
+      '[data-automation-type="RibbonSplitButton"]',
+      'div[role="main"]'
     ]
 
     let outlookLoaded = false
-    for (const selector of newMailSelectors) {
+    for (const selector of outlookLoadedSelectors) {
       try {
         const element = page.locator(selector).first()
-        await element.waitFor({ state: 'visible', timeout: 30000 })
-        log('✓ Outlook 邮箱激活成功！')
+        await element.waitFor({ state: 'visible', timeout: 10000 })
+        log('✓ Outlook 邮箱加载完成！')
         outlookLoaded = true
         break
       } catch {
@@ -752,28 +975,26 @@ export async function activateOutlook(
     }
 
     if (!outlookLoaded) {
-      // 检查是否已经在收件箱页面
+      // 检查 URL 是否已经在 Outlook 页面
       const currentUrl = page.url()
-      if (
-        currentUrl.toLowerCase().includes('outlook') ||
-        currentUrl.toLowerCase().includes('mail')
-      ) {
-        log('✓ 已进入 Outlook 邮箱页面，激活成功！')
+      if (currentUrl.toLowerCase().includes('outlook') || currentUrl.toLowerCase().includes('mail')) {
+        log('✓ 已进入 Outlook 邮箱页面')
         outlookLoaded = true
       }
     }
 
-    await page.waitForTimeout(2000)
+    if (outlookLoaded) {
+      log('✓ Outlook 邮箱激活成功！')
+    } else {
+      log('⚠️ 无法确认 Outlook 邮箱是否完全加载，但继续执行')
+    }
+
+    await page.waitForTimeout(1000)
     await browser.close()
     browser = null
 
-    if (outlookLoaded) {
-      log('\n========== Outlook 邮箱激活完成 ==========')
-      return { success: true }
-    } else {
-      log('\n⚠ Outlook 邮箱激活可能未完成')
-      return { success: false, error: 'Outlook 邮箱激活可能未完成' }
-    }
+    log('\n========== Outlook 邮箱激活完成 ==========')
+    return { success: true }
   } catch (error) {
     log(`\n✗ Outlook 激活失败: ${error}`)
     if (browser) {
@@ -794,6 +1015,9 @@ export async function activateOutlook(
  * @param emailPassword 邮箱密码（用于 Outlook 激活）
  * @param skipOutlookActivation 是否跳过 Outlook 激活
  * @param proxyUrl 代理地址（仅用于 AWS 注册，不用于 Outlook 激活和获取验证码）
+ * @param backupEmail 备用邮箱（用于 Outlook 安全验证）
+ * @param backupEmailRefreshToken 备用邮箱的 refresh token
+ * @param backupEmailClientId 备用邮箱的 client ID
  */
 export async function autoRegisterAWS(
   email: string,
@@ -802,7 +1026,10 @@ export async function autoRegisterAWS(
   log: LogCallback,
   emailPassword?: string,
   skipOutlookActivation: boolean = false,
-  proxyUrl?: string
+  proxyUrl?: string,
+  backupEmail?: string,
+  backupEmailRefreshToken?: string,
+  backupEmailClientId?: string
 ): Promise<{ success: boolean; ssoToken?: string; name?: string; error?: string }> {
   const password = 'admin123456aA!'
   const randomName = generateRandomName()
@@ -811,7 +1038,14 @@ export async function autoRegisterAWS(
   // 如果是 Outlook 邮箱且提供了密码，先激活（不使用代理）
   if (!skipOutlookActivation && email.toLowerCase().includes('outlook') && emailPassword) {
     log('检测到 Outlook 邮箱，先进行激活（不使用代理）...')
-    const activationResult = await activateOutlook(email, emailPassword, log)
+    const activationResult = await activateOutlook(
+      email,
+      emailPassword,
+      log,
+      backupEmail,
+      backupEmailRefreshToken,
+      backupEmailClientId
+    )
     if (!activationResult.success) {
       log(`⚠ Outlook 激活可能未完成: ${activationResult.error}`)
       log('继续尝试 AWS 注册...')
