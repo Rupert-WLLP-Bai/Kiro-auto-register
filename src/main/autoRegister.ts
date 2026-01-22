@@ -12,6 +12,86 @@ import { chromium, Browser, Page } from 'playwright'
 // 日志回调类型
 type LogCallback = (message: string) => void
 
+// ============ 人工介入和完成检测函数 ============
+
+/**
+ * 检测 AWS 注册是否完成
+ * @returns true 表示已完成，false 表示未完成
+ */
+async function checkAWSRegistrationComplete(page: Page): Promise<boolean> {
+  try {
+    // 检测 1：SSO Token Cookie 存在
+    const cookies = await page.context().cookies()
+    const ssoToken = cookies.find(c => c.name === 'x-amz-sso_authn')
+    if (ssoToken) {
+      return true
+    }
+
+    // 检测 2：成功页面 URL
+    const url = page.url()
+    if (url.includes('success') || url.includes('complete')) {
+      return true
+    }
+
+    // 检测 3：特定成功元素
+    const successElement = await page.$('text=Registration successful')
+    if (successElement) {
+      return true
+    }
+
+    return false
+  } catch (error) {
+    return false
+  }
+}
+
+/**
+ * 等待用户手动完成操作
+ * @param page Playwright Page 对象
+ * @param checkComplete 完成检测函数
+ * @param stepName 步骤名称（用于日志）
+ * @param timeout 最大等待时间（秒）
+ * @returns true 表示用户完成，false 表示超时
+ */
+async function waitForManualCompletion(
+  page: Page,
+  checkComplete: (page: Page) => Promise<boolean>,
+  stepName: string,
+  timeout: number = 600 // 默认 10 分钟
+): Promise<boolean> {
+  const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`)
+
+  log(`\n⏸️  需要人工介入：${stepName}`)
+  log(`📌 请在浏览器中手动完成操作`)
+  log(`⏱️  程序将等待最多 ${timeout} 秒，每 3 秒检测一次`)
+  log(`🔍 检测到完成后将自动继续...\n`)
+
+  const startTime = Date.now()
+  const checkInterval = 3000 // 3 秒检测一次
+
+  while (Date.now() - startTime < timeout * 1000) {
+    // 检测是否完成
+    const isComplete = await checkComplete(page)
+    if (isComplete) {
+      log(`✅ 检测到操作已完成，继续执行...`)
+      return true
+    }
+
+    // 等待下一次检测
+    await page.waitForTimeout(checkInterval)
+
+    // 显示进度
+    const elapsed = Math.floor((Date.now() - startTime) / 1000)
+    const remaining = timeout - elapsed
+    if (elapsed % 15 === 0) { // 每 15 秒显示一次进度
+      log(`⏳ 已等待 ${elapsed}s，剩余 ${remaining}s...`)
+    }
+  }
+
+  log(`⏱️  等待超时（${timeout}s），操作未完成`)
+  return false
+}
+
 // ============ 人性化操作辅助函数 ============
 
 /**
@@ -671,6 +751,7 @@ export async function activateOutlook(
 ): Promise<{ success: boolean; error?: string }> {
   const activationUrl = 'https://go.microsoft.com/fwlink/p/?linkid=2125442'
   let browser: Browser | null = null
+  let page: Page | null = null
 
   log('========== 开始激活 Outlook 邮箱 ==========')
   log(`邮箱: ${email}`)
@@ -689,7 +770,7 @@ export async function activateOutlook(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     })
 
-    const page = await context.newPage()
+    page = await context.newPage()
 
     await page.goto(activationUrl, { waitUntil: 'networkidle', timeout: 60000 })
     log('✓ 页面加载完成')
@@ -997,6 +1078,65 @@ export async function activateOutlook(
     return { success: true }
   } catch (error) {
     log(`\n✗ Outlook 激活失败: ${error}`)
+
+    // 判断是否是超时错误
+    const isTimeout = error instanceof Error && (
+      error.message?.includes('Timeout') ||
+      error.message?.includes('timeout') ||
+      error.message?.includes('waiting for')
+    )
+
+    if (isTimeout && browser && page) {
+      log(`\n⚠️  检测到超时，尝试等待人工完成...`)
+
+      // 不关闭浏览器，等待用户手动完成
+      // 对于 Outlook 激活，我们检查是否已经进入邮箱页面
+      const checkOutlookActivated = async (page: Page): Promise<boolean> => {
+        try {
+          const url = page.url()
+          if (url.toLowerCase().includes('outlook') || url.toLowerCase().includes('mail')) {
+            return true
+          }
+
+          // 检查是否有邮箱界面的关键元素
+          const outlookElements = [
+            'button[aria-label="New mail"]',
+            'button:has-text("New mail")',
+            'button:has-text("新邮件")',
+            'span:has-text("Inbox")',
+            'span:has-text("收件箱")'
+          ]
+
+          for (const selector of outlookElements) {
+            const element = await page.$(selector)
+            if (element) {
+              return true
+            }
+          }
+
+          return false
+        } catch {
+          return false
+        }
+      }
+
+      const manualCompleted = await waitForManualCompletion(
+        page,
+        checkOutlookActivated,
+        'Outlook 邮箱激活',
+        600 // 10 分钟
+      )
+
+      if (manualCompleted) {
+        log(`✅ Outlook 邮箱激活成功`)
+        if (browser) {
+          await browser.close()
+        }
+        return { success: true }
+      }
+    }
+
+    // 如果不是超时，或者人工完成失败，才关闭浏览器
     if (browser) {
       try {
         await browser.close()
@@ -1034,6 +1174,7 @@ export async function autoRegisterAWS(
   const password = 'admin123456aA!'
   const randomName = generateRandomName()
   let browser: Browser | null = null
+  let page: Page | null = null
 
   // 如果是 Outlook 邮箱且提供了密码，先激活（不使用代理）
   if (!skipOutlookActivation && email.toLowerCase().includes('outlook') && emailPassword) {
@@ -1079,7 +1220,7 @@ export async function autoRegisterAWS(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     })
 
-    const page = await context.newPage()
+    page = await context.newPage()
 
     const registerUrl = 'https://view.awsapps.com/start/#/device?user_code=PQCF-FCCN'
     await page.goto(registerUrl, { waitUntil: 'networkidle', timeout: 60000 })
@@ -1089,7 +1230,7 @@ export async function autoRegisterAWS(
     // 等待邮箱输入框出现并输入邮箱（使用人类行为模拟）
     // 选择器: input[placeholder="username@example.com"]
     const emailInputSelector = 'input[placeholder="username@example.com"]'
-    if (!(await humanType(page, emailInputSelector, email, log, '邮箱输入框'))) {
+    if (!(await humanType(page, emailInputSelector, email, '邮箱输入框'))) {
       throw new Error('未找到邮箱输入框')
     }
 
@@ -1199,7 +1340,7 @@ export async function autoRegisterAWS(
         // 步骤2(登录): 输入密码（使用人类行为模拟）
         log('\n步骤2(登录): 输入密码...')
         const loginPasswordSelector = 'input[placeholder="Enter password"]'
-        if (!(await humanType(page, loginPasswordSelector, password, log, '登录密码输入框'))) {
+        if (!(await humanType(page, loginPasswordSelector, password, '登录密码输入框'))) {
           throw new Error('未找到登录密码输入框')
         }
 
@@ -1271,7 +1412,7 @@ export async function autoRegisterAWS(
       // ========== 注册流程（新账号）==========
       // 步骤2: 等待姓名输入框出现，输入姓名
       log('\n步骤2: 输入姓名...')
-      if (!(await humanType(page, nameInputSelector, randomName, log, '姓名输入框'))) {
+      if (!(await humanType(page, nameInputSelector, randomName, '姓名输入框'))) {
         throw new Error('未找到姓名输入框')
       }
 
@@ -1279,7 +1420,7 @@ export async function autoRegisterAWS(
 
       // 使用更像人的点击方式提交
       const secondContinueSelector = 'button[data-testid="signup-next-button"]'
-      if (!(await humanClick(page, secondContinueSelector, log, '第二个继续按钮'))) {
+      if (!(await humanClick(page, secondContinueSelector, '第二个继续按钮'))) {
         throw new Error('点击第二个继续按钮失败')
       }
 
@@ -1394,11 +1535,50 @@ export async function autoRegisterAWS(
     }
   } catch (error) {
     log(`\n✗ 注册失败: ${error}`)
+
+    // 判断是否是超时错误
+    const isTimeout = error instanceof Error && (
+      error.message?.includes('Timeout') ||
+      error.message?.includes('timeout') ||
+      error.message?.includes('waiting for')
+    )
+
+    if (isTimeout && browser && page) {
+      log(`\n⚠️  检测到超时，尝试等待人工完成...`)
+
+      // 不关闭浏览器，等待用户手动完成
+      const manualCompleted = await waitForManualCompletion(
+        page,
+        checkAWSRegistrationComplete,
+        'AWS Builder ID 注册',
+        600 // 10 分钟
+      )
+
+      if (manualCompleted) {
+        // 用户完成了，尝试获取 SSO Token
+        const cookies = await page.context().cookies()
+        const ssoToken = cookies.find(c => c.name === 'x-amz-sso_authn')
+
+        if (ssoToken) {
+          log(`✅ 成功获取 SSO Token`)
+          if (browser) {
+            await browser.close()
+          }
+          return {
+            success: true,
+            ssoToken: ssoToken.value
+          }
+        }
+      }
+    }
+
+    // 如果不是超时，或者人工完成失败，才关闭浏览器
     if (browser) {
       try {
         await browser.close()
       } catch {}
     }
+
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
 }

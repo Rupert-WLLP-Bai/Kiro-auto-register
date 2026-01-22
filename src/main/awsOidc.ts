@@ -9,6 +9,78 @@ import { getOutlookVerificationCode } from './autoRegister'
 // 日志回调类型
 type LogCallback = (message: string) => void
 
+// ============ 人工介入和完成检测函数 ============
+
+/**
+ * 检测浏览器授权是否完成
+ */
+async function checkAuthorizationComplete(page: Page): Promise<boolean> {
+  try {
+    // 检测 1：Allow access 按钮消失
+    const allowButton = await page.$('button:has-text("Allow access")')
+    if (!allowButton) {
+      return true
+    }
+
+    // 检测 2：成功页面
+    const url = page.url()
+    if (url.includes('success') || url.includes('authorized')) {
+      return true
+    }
+
+    return false
+  } catch (error) {
+    return false
+  }
+}
+
+/**
+ * 等待用户手动完成操作
+ * @param page Playwright Page 对象
+ * @param checkComplete 完成检测函数
+ * @param stepName 步骤名称（用于日志）
+ * @param timeout 最大等待时间（秒）
+ * @returns true 表示用户完成，false 表示超时
+ */
+async function waitForManualCompletion(
+  page: Page,
+  checkComplete: (page: Page) => Promise<boolean>,
+  stepName: string,
+  timeout: number = 600 // 默认 10 分钟
+): Promise<boolean> {
+  const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`)
+
+  log(`\n⏸️  需要人工介入：${stepName}`)
+  log(`📌 请在浏览器中手动完成操作`)
+  log(`⏱️  程序将等待最多 ${timeout} 秒，每 3 秒检测一次`)
+  log(`🔍 检测到完成后将自动继续...\n`)
+
+  const startTime = Date.now()
+  const checkInterval = 3000 // 3 秒检测一次
+
+  while (Date.now() - startTime < timeout * 1000) {
+    // 检测是否完成
+    const isComplete = await checkComplete(page)
+    if (isComplete) {
+      log(`✅ 检测到操作已完成，继续执行...`)
+      return true
+    }
+
+    // 等待下一次检测
+    await page.waitForTimeout(checkInterval)
+
+    // 显示进度
+    const elapsed = Math.floor((Date.now() - startTime) / 1000)
+    const remaining = timeout - elapsed
+    if (elapsed % 15 === 0) { // 每 15 秒显示一次进度
+      log(`⏳ 已等待 ${elapsed}s，剩余 ${remaining}s...`)
+    }
+  }
+
+  log(`⏱️  等待超时（${timeout}s），操作未完成`)
+  return false
+}
+
 // ============ AWS OIDC API 配置 ============
 const OIDC_ENDPOINT = 'https://oidc.us-east-1.amazonaws.com'
 const START_URL = 'https://view.awsapps.com/start'
@@ -164,8 +236,10 @@ export async function autoAuthorize(
 ): Promise<boolean> {
   log('🌐 开始浏览器授权流程...')
 
+  let page: Page | null = null
+
   try {
-    const page = await context.newPage()
+    page = await context.newPage()
 
     // 打开授权链接
     log(`   访问授权页面: ${verificationUrl}`)
@@ -468,6 +542,31 @@ export async function autoAuthorize(
     }
   } catch (error) {
     log(`   ❌ 授权失败: ${error}`)
+
+    // 判断是否是超时错误
+    const isTimeout = error instanceof Error && (
+      error.message?.includes('Timeout') ||
+      error.message?.includes('timeout') ||
+      error.message?.includes('waiting for')
+    )
+
+    if (isTimeout) {
+      log(`\n⚠️  检测到超时，等待人工完成授权...`)
+
+      const manualCompleted = await waitForManualCompletion(
+        page,
+        checkAuthorizationComplete,
+        '浏览器授权',
+        600
+      )
+
+      if (manualCompleted) {
+        log(`✅ 授权完成`)
+        await page.close()
+        return true
+      }
+    }
+
     throw error
   }
 }

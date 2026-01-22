@@ -717,23 +717,33 @@ async function executeRegistration(
       )
 
       if (!registerResult.success) {
-        // 标记为暂停，等待人工介入
-        stateManager.updateTaskState(task.id, {
-          status: 'paused',
-          pauseReason: 'aws_registration_failed',
-          pauseMessage: `AWS 注册失败: ${registerResult.error}`,
-          pauseTime: new Date().toISOString()
-        })
-        await stateManager.saveState()
+        // 检查是否是超时导致的失败
+        const isTimeoutError = registerResult.error?.includes('Timeout') ||
+                               registerResult.error?.includes('timeout') ||
+                               registerResult.error?.includes('waiting for')
 
-        log(`\n🚨 [${task.id}] 需要人工介入！`)
-        log(`   任务: ${account.email}`)
-        log(`   步骤: 步骤2 - AWS Builder ID 注册`)
-        log(`   原因: ${registerResult.error}`)
-        log(`   操作: 请手动完成注册后，使用以下命令继续:`)
-        log(`   npx tsx parallel-register.ts --resume --resume-from-step 3\n`)
+        if (isTimeoutError) {
+          // 超时错误，可能用户已手动完成，不标记为 paused
+          taskLogger('⚠️ 超时但可能已手动完成，继续下一步...')
+        } else {
+          // 其他错误，标记为暂停
+          stateManager.updateTaskState(task.id, {
+            status: 'paused',
+            pauseReason: 'aws_registration_failed',
+            pauseMessage: `AWS 注册失败: ${registerResult.error}`,
+            pauseTime: new Date().toISOString()
+          })
+          await stateManager.saveState()
 
-        throw new Error(`AWS 注册失败: ${registerResult.error}`)
+          log(`\n🚨 [${task.id}] 需要人工介入！`)
+          log(`   任务: ${account.email}`)
+          log(`   步骤: 步骤2 - AWS Builder ID 注册`)
+          log(`   原因: ${registerResult.error}`)
+          log(`   操作: 请手动完成注册后，使用以下命令继续:`)
+          log(`   npx tsx parallel-register.ts --resume --resume-from-step 3\n`)
+
+          throw new Error(`AWS 注册失败: ${registerResult.error}`)
+        }
       }
 
       taskLogger('✅ AWS 注册成功')
@@ -806,23 +816,35 @@ async function executeRegistration(
         stateManager.updateTaskState(task.id, { completedSteps: Array.from(completedSteps) })
         await stateManager.saveState()
       } catch (error) {
-        // 浏览器授权失败，可能需要人工介入
-        stateManager.updateTaskState(task.id, {
-          status: 'paused',
-          pauseReason: 'browser_authorization_failed',
-          pauseMessage: `浏览器授权失败: ${error}`,
-          pauseTime: new Date().toISOString()
-        })
-        await stateManager.saveState()
+        // 浏览器授权失败，检查是否是超时错误
+        const isTimeoutError = error instanceof Error && (
+          error.message?.includes('Timeout') ||
+          error.message?.includes('timeout') ||
+          error.message?.includes('waiting for')
+        )
 
-        log(`\n🚨 [${task.id}] 需要人工介入！`)
-        log(`   任务: ${account.email}`)
-        log(`   步骤: 步骤5 - 浏览器授权`)
-        log(`   原因: ${error}`)
-        log(`   操作: 请在浏览器中手动完成授权后，使用以下命令继续:`)
-        log(`   npx tsx parallel-register.ts --resume --resume-from-step 6\n`)
+        if (isTimeoutError) {
+          // 超时错误，可能用户已手动完成，不标记为 paused
+          taskLogger('⚠️ 授权超时但可能已手动完成，继续下一步...')
+        } else {
+          // 其他错误，标记为暂停
+          stateManager.updateTaskState(task.id, {
+            status: 'paused',
+            pauseReason: 'browser_authorization_failed',
+            pauseMessage: `浏览器授权失败: ${error}`,
+            pauseTime: new Date().toISOString()
+          })
+          await stateManager.saveState()
 
-        throw error
+          log(`\n🚨 [${task.id}] 需要人工介入！`)
+          log(`   任务: ${account.email}`)
+          log(`   步骤: 步骤5 - 浏览器授权`)
+          log(`   原因: ${error}`)
+          log(`   操作: 请在浏览器中手动完成授权后，使用以下命令继续:`)
+          log(`   npx tsx parallel-register.ts --resume --resume-from-step 6\n`)
+
+          throw error
+        }
       }
     }
 
