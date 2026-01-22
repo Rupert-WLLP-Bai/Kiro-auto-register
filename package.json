@@ -33,6 +33,8 @@
     "electron-store": "^11.0.2",
     "electron-updater": "^6.3.9",
     "lucide-react": "^0.555.0",
+    "ora": "^9.1.0",
+    "p-queue": "^9.1.0",
     "playwright": "^1.57.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.17",

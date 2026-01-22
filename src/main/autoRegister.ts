@@ -846,22 +846,22 @@ export async function activateOutlook(
                 log('   等待验证码输入框出现...')
                 await page.waitForTimeout(2000)
 
-                // 输入验证码 - 使用更精确的选择器
+                // 输入验证码 - 使用更精确的选择器（优先使用最常见的类型）
                 const codeInputSelectors = [
-                  'input[type="text"][name="ProofConfirmation"]',
-                  'input[name="ProofConfirmation"]',
-                  'input[type="tel"]',
-                  'input[aria-label*="代码"]',
+                  'input[type="tel"]',  // 验证码输入框通常是 tel 类型
                   'input[aria-label*="code"]',
+                  'input[aria-label*="代码"]',
                   'input[placeholder*="代码"]',
-                  'input[type="text"]'
+                  'input[type="text"]',
+                  'input[name="ProofConfirmation"]',
+                  'input[type="text"][name="ProofConfirmation"]'
                 ]
 
                 let codeInputSuccess = false
                 for (const codeSelector of codeInputSelectors) {
                   try {
                     const codeInput = page.locator(codeSelector).first()
-                    await codeInput.waitFor({ state: 'visible', timeout: 10000 })
+                    await codeInput.waitFor({ state: 'visible', timeout: 5000 })
 
                     // 获取元素位置并移动鼠标
                     const box = await codeInput.boundingBox()
