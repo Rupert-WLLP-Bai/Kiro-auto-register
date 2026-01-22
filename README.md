@@ -1,18 +1,36 @@
 # Kiro Auto Register - 并行注册增强版
 
-> 基于 AIClient-2-API 的批量并行注册工具，支持高效的 AWS Builder ID 批量注册
+> 基于 [Pluviobyte/Kiro-auto-register](https://github.com/Pluviobyte/Kiro-auto-register) 的并行注册增强版本，配合 [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) 实现完整的 AWS Builder ID 批量注册和使用流程
 
 ## 📖 项目简介
 
-本项目是 [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) 的功能增强版本，**专注于批量并行注册场景**。原项目主要是一个 Electron 桌面应用，本 Fork 移除了前端部分，新增了完整的并行注册系统。
+本项目是 [Pluviobyte/Kiro-auto-register](https://github.com/Pluviobyte/Kiro-auto-register) 的功能增强版本，**专注于批量并行注册场景**。
+
+### 项目关系
+
+```
+Pluviobyte/Kiro-auto-register (原始项目)
+    ↓ Fork + 增强
+本项目 (并行注册增强版)
+    ↓ 保存凭据到
+AIClient-2-API (配套使用)
+```
+
+- **原始项目**: [Pluviobyte/Kiro-auto-register](https://github.com/Pluviobyte/Kiro-auto-register) - 基础的 AWS Builder ID 注册工具
+- **本项目**: 增强版本，新增并行注册、断点续传、灵活的辅助邮箱配置等功能
+- **配套项目**: [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) - 使用注册的账号提供 API 服务
+
+### 完整工作流程
+
+1. **本项目** → 批量注册 AWS Builder ID 账号
+2. **本项目** → 保存凭据到 AIClient-2-API 的 `configs/kiro/` 目录
+3. **AIClient-2-API** → 读取凭据并提供 API 服务
 
 ### 与原项目的主要区别
 
-| 特性 | 原项目 (main) | 本项目 (feature) |
-|------|---------------|------------------|
-| **项目类型** | Electron 桌面应用 | CLI 批量处理工具 |
-| **注册方式** | 单个账号手动注册 | 批量并行自动注册 |
-| **并发能力** | ❌ 不支持 | ✅ 可配置并发数（推荐 2-3） |
+| 特性 | 原项目 | 本增强版 |
+|------|--------|----------|
+| **并发能力** | ❌ 单线程顺序执行 | ✅ 可配置并发数（推荐 2-3） |
 | **辅助邮箱** | ❌ 不支持 | ✅ 独立索引 + 自定义映射 |
 | **断点续传** | ❌ 不支持 | ✅ 完整状态管理 |
 | **配置预览** | ❌ 不支持 | ✅ Dry-Run 模式 |
@@ -35,22 +53,24 @@
 - 新增 `parallel-register.ts`（1,219 行）：完整的并行注册引擎
 - 新增 `src/main/awsOidc.ts`（473 行）：AWS OIDC 客户端注册模块
 - 增强 `src/main/autoRegister.ts`：支持辅助邮箱验证码获取
-- 移除前端代码：专注于 CLI 批量处理场景
+- 与 AIClient-2-API 打通数据链路：自动保存凭据到指定目录
 
 ## 🚀 快速开始
 
 ### 前置要求
 
-1. **安装 Node.js**（推荐 v18 或更高版本）
-2. **安装 AIClient-2-API**：
+1. **Node.js**（推荐 v18+）
+2. **AIClient-2-API**（用于使用注册的账号）：
    ```bash
    git clone https://github.com/justlovemaki/AIClient-2-API.git
    cd AIClient-2-API
    # 按照其 README 完成安装
    ```
 
-3. **安装依赖**：
+3. **安装本项目依赖**：
    ```bash
+   git clone https://github.com/Rupert-WLLP-Bai/Kiro-auto-register.git
+   cd Kiro-auto-register
    npm install
    ```
 
@@ -306,7 +326,16 @@ MIT License
 
 ## 🔗 相关项目
 
-- [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) - 原始项目（Electron 桌面应用）
+- [Pluviobyte/Kiro-auto-register](https://github.com/Pluviobyte/Kiro-auto-register) - 原始项目
+- [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) - 配套的 API 服务项目
+
+## ⚠️ 已知问题
+
+### AIClient-2-API 中的 Claude Haiku 问题
+
+在使用 AIClient-2-API 时发现，调用 Claude Haiku 模型会出现问题。**解决方案**：将所有请求路由到 Sonnet 模型。
+
+如果遇到此问题，可以自行在 AIClient-2-API 项目中进行 patch 修改。
 
 ---
 
