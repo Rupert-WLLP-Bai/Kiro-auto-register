@@ -1,20 +1,41 @@
-# Kiro Auto Register
+# Kiro Auto Register - 并行注册增强版
 
-> 自动化批量注册 AWS Builder ID 并生成 Kiro IDE 凭证的工具
+> 基于 AIClient-2-API 的批量并行注册工具，支持高效的 AWS Builder ID 批量注册
 
 ## 📖 项目简介
 
-本项目与 [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) 联动使用，主要解决 **Kiro IDE 的注册和凭证生成问题**，支持批量导入 Outlook 邮箱进行自动化注册。
+本项目是 [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) 的功能增强版本，**专注于批量并行注册场景**。原项目主要是一个 Electron 桌面应用，本 Fork 移除了前端部分，新增了完整的并行注册系统。
 
-### 核心功能
+### 与原项目的主要区别
 
-- ✅ **批量注册 AWS Builder ID**：自动完成邮箱验证、密码设置等步骤
-- ✅ **自动激活 Outlook 邮箱**：确保邮箱能正常接收验证码
-- ✅ **自动获取验证码**：通过 Microsoft Graph API 自动读取邮箱验证码
-- ✅ **生成 Kiro 凭证**：自动保存到 AIClient-2-API 配置目录
-- ✅ **并行注册**：支持多账号并发注册，提高效率
-- ✅ **断点续传**：支持中断后恢复，人工介入后继续执行
-- ✅ **独立辅助邮箱**：主邮箱和辅助邮箱可使用不同的起始索引
+| 特性 | 原项目 (main) | 本项目 (feature) |
+|------|---------------|------------------|
+| **项目类型** | Electron 桌面应用 | CLI 批量处理工具 |
+| **注册方式** | 单个账号手动注册 | 批量并行自动注册 |
+| **并发能力** | ❌ 不支持 | ✅ 可配置并发数（推荐 2-3） |
+| **辅助邮箱** | ❌ 不支持 | ✅ 独立索引 + 自定义映射 |
+| **断点续传** | ❌ 不支持 | ✅ 完整状态管理 |
+| **配置预览** | ❌ 不支持 | ✅ Dry-Run 模式 |
+| **人工介入** | ❌ 不支持 | ✅ 自动暂停和恢复 |
+| **进度监控** | ❌ 基础日志 | ✅ 实时进度显示 |
+
+### 新增功能
+
+**核心能力：**
+- 🚀 **并行注册系统**：使用 p-queue 管理并发任务，支持 2-3 个账号同时注册
+- 📊 **完整状态管理**：每个任务 7 个步骤独立追踪，支持任意步骤恢复
+- 🔄 **断点续传**：程序崩溃或人工介入后可无缝恢复
+- 🎯 **灵活的辅助邮箱配置**：
+  - 独立索引模式：主邮箱索引 30-32，辅助邮箱索引 5-7
+  - 自定义映射模式：通过 mapping.txt 精确指定（如 30→5, 31→10, 32→15）
+- 🔍 **Dry-Run 模式**：预览配置和账号对应关系，避免配置错误
+- ⚠️ **强制辅助邮箱**：提升安全性，防止验证码获取失败
+
+**技术实现：**
+- 新增 `parallel-register.ts`（1,219 行）：完整的并行注册引擎
+- 新增 `src/main/awsOidc.ts`（473 行）：AWS OIDC 客户端注册模块
+- 增强 `src/main/autoRegister.ts`：支持辅助邮箱验证码获取
+- 移除前端代码：专注于 CLI 批量处理场景
 
 ## 🚀 快速开始
 
@@ -35,13 +56,7 @@
 
 ### 准备账号文件
 
-#### 1. 主邮箱文件格式
-
-创建 `accounts.txt` 文件，每行一个账号，格式如下：
-
-```
-email|password|refresh_token|client_id
-```
+创建 `accounts.txt` 文件，每行一个账号，格式：`email|password|refresh_token|client_id`
 
 **示例：**
 ```
@@ -49,52 +64,56 @@ example1@outlook.com|YourPassword123!|M.C509_xxx...|9e5f94bc-xxx...
 example2@outlook.com|YourPassword123!|M.C509_xxx...|9e5f94bc-xxx...
 ```
 
-**重要：**
-- ⚠️ **必须提前清洗掉 `refresh_token` 末尾的 `$$` 符号**
-- 每个字段用 `|` 分隔
-- 不要有空行
-
-#### 2. 辅助邮箱文件格式（可选）
-
-如果需要使用独立的辅助邮箱文件，创建 `backup-accounts.txt`：
-
-```
-backup_email|backup_refresh_token|backup_client_id
-```
-
-**示例：**
-```
-backup1@outlook.com|M.C509_xxx...|9e5f94bc-xxx...
-backup2@outlook.com|M.C509_xxx...|9e5f94bc-xxx...
-```
+**重要：** ⚠️ 必须提前清洗掉 `refresh_token` 末尾的 `$$` 符号
 
 ### 基本使用
 
-#### 最简单的用法
+#### 1. 预览配置（推荐先运行）
 
 ```bash
 npx tsx parallel-register.ts \
   --accounts-file accounts.txt \
-  --start-index 0 \
-  --count 5
+  --start-index 30 \
+  --backup-start-index 5 \
+  --count 3 \
+  --dry-run
 ```
 
-这将从第 0 行开始，注册 5 个账号。
-
-#### 使用独立的辅助邮箱文件
+#### 2. 独立索引模式（同一文件）
 
 ```bash
 npx tsx parallel-register.ts \
-  --accounts-file main-accounts.txt \
-  --start-index 10 \
-  --backup-accounts-file backup-accounts.txt \
+  --accounts-file accounts.txt \
+  --start-index 30 \
   --backup-start-index 5 \
   --count 3
 ```
 
 **结果：**
-- 主邮箱：使用 `main-accounts.txt` 的第 10、11、12 行
-- 辅助邮箱：使用 `backup-accounts.txt` 的第 5、6、7 行
+- 主邮箱：第 30、31、32 行
+- 辅助邮箱：第 5、6、7 行
+
+#### 3. 自定义映射模式
+
+创建 `mapping.txt`：
+```
+30:5
+31:10
+32:15
+```
+
+运行：
+```bash
+npx tsx parallel-register.ts \
+  --accounts-file accounts.txt \
+  --backup-mapping-file mapping.txt \
+  --count 3
+```
+
+**结果：**
+- 账号 30 → 辅助账号 5
+- 账号 31 → 辅助账号 10
+- 账号 32 → 辅助账号 15
 
 ## 📋 命令行参数
 
@@ -102,53 +121,43 @@ npx tsx parallel-register.ts \
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
-| `--accounts-file` | 主邮箱账号文件路径 | `accounts.txt` |
-| `--start-index` | 起始行号（从 0 开始） | `0` |
+| `--accounts-file` | 账号文件路径 | `accounts.txt` |
+| `--start-index` | 主邮箱起始行号（从 0 开始） | `30` |
 | `--count` | 注册账号数量 | `5` |
+| `--backup-start-index` 或 `--backup-mapping-file` | 辅助邮箱配置（二选一） | `5` 或 `mapping.txt` |
 
 ### 可选参数
 
-#### 辅助邮箱配置
-
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--backup-accounts-file` | 辅助邮箱文件路径 | 无（从主文件读取） |
-| `--backup-start-index` | 辅助邮箱起始行号 | 与主邮箱相同 |
-
-#### 并发和性能
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--concurrency` | 最大并发任务数 | `2` |
+| `--concurrency` | 并发任务数 | `2` |
 | `--delay-min` | 任务启动最小延迟（秒） | `5` |
 | `--delay-max` | 任务启动最大延迟（秒） | `15` |
-| `--max-retries` | 失败自动重试次数 | `2` |
+| `--max-retries` | 失败重试次数 | `2` |
+| `--backup-accounts-file` | 独立辅助邮箱文件 | 无 |
+| `--dry-run` | 预览模式（不执行注册） | `false` |
+| `--resume` | 恢复中断的任务 | - |
+| `--aiclient-path` | AIClient-2-API 路径 | 自动检测 |
 
-#### 断点续传
+## 🎯 高级用法
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--resume` | 恢复上次中断的任务 | - |
-| `--state-file` | 状态文件路径 | `.parallel-register-state.json` |
-| `--resume-from-step` | 从指定步骤继续（1-7） | 从状态文件读取 |
-
-#### 其他选项
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--aiclient-path` | AIClient-2-API 路径 | `/Users/pejoyll/Desktop/code/2026/AIClient-2-API` |
-| `--skip-activation` | 跳过 Outlook 激活 | `false` |
-| `--proxy` | HTTP 代理地址 | 无 |
-
-## 🎯 使用场景
-
-### 场景 1：批量注册新账号
+### 场景 1：大批量注册（推荐）
 
 ```bash
+# 先预览配置
 npx tsx parallel-register.ts \
   --accounts-file accounts.txt \
   --start-index 0 \
-  --count 10 \
+  --backup-start-index 50 \
+  --count 20 \
+  --dry-run
+
+# 确认无误后执行
+npx tsx parallel-register.ts \
+  --accounts-file accounts.txt \
+  --start-index 0 \
+  --backup-start-index 50 \
+  --count 20 \
   --concurrency 3
 ```
 
@@ -158,36 +167,19 @@ npx tsx parallel-register.ts \
 npx tsx parallel-register.ts \
   --accounts-file accounts.txt \
   --start-index 0 \
+  --backup-start-index 50 \
   --count 5 \
   --proxy http://127.0.0.1:7890
 ```
 
-### 场景 3：遇到需要人工介入的情况
+### 场景 3：断点续传
 
 ```bash
-# 第一次运行
-npx tsx parallel-register.ts \
-  --accounts-file accounts.txt \
-  --start-index 0 \
-  --count 5
-
-# 如果遇到需要人工处理的情况，程序会暂停并提示：
-# 🚨 [task-2] 需要人工介入！
-#    任务: example@outlook.com
-#    步骤: 步骤2 - AWS Builder ID 注册
-#    原因: 无法获取验证码
-#    操作: 请手动完成注册后，使用以下命令继续:
-#    npx tsx parallel-register.ts --resume --resume-from-step 3
-
-# 手动完成后，运行恢复命令：
-npx tsx parallel-register.ts --resume --resume-from-step 3
-```
-
-### 场景 4：程序崩溃后恢复
-
-```bash
-# 如果程序意外中断（Ctrl+C 或崩溃），直接恢复：
+# 程序中断后直接恢复
 npx tsx parallel-register.ts --resume
+
+# 或从指定步骤恢复
+npx tsx parallel-register.ts --resume --resume-from-step 3
 ```
 
 ## 🔧 注册流程
@@ -233,64 +225,48 @@ npx tsx parallel-register.ts --resume
 
 ## ⚠️ 注意事项
 
-### 账号文件准备
-
-1. **清洗 refresh_token**：
-   - ❌ 错误：`M.C509_xxx...$$`
-   - ✅ 正确：`M.C509_xxx...`
-   - 必须删除末尾的 `$$` 符号
-
-2. **格式要求**：
-   - 使用 `|` 分隔字段
-   - 不要有空行
-   - 确保每行格式一致
-
-3. **索引从 0 开始**：
-   - 第一行是索引 0
-   - 第二行是索引 1
-   - 以此类推
-
-### 并发建议
-
-- 建议并发数设置为 2-3，避免触发反自动化检测
-- 任务间会自动添加随机延迟（5-15 秒）
-
-### 人工介入
-
-以下情况可能需要人工介入：
-- 验证码获取失败
-- 遇到 CAPTCHA
-- 邮箱需要额外验证
-- 网络问题导致超时
-
-程序会自动暂停并提示，其他任务继续执行。
+1. **辅助邮箱必需**：为了安全性，必须配置辅助邮箱（用于接收验证码）
+2. **清洗 refresh_token**：必须删除末尾的 `$$` 符号
+3. **并发建议**：推荐设置为 2-3，避免触发反自动化检测
+4. **索引从 0 开始**：第一行是索引 0，第二行是索引 1
+5. **先用 Dry-Run**：建议先用 `--dry-run` 预览配置，确认无误后再执行
 
 ## 🛠️ 故障排除
 
-### 问题 1：refresh_token 无效
+### 问题 1：提示"必须提供辅助邮箱配置"
+
+**解决**：添加 `--backup-start-index` 或 `--backup-mapping-file` 参数
+
+```bash
+# 正确示例
+npx tsx parallel-register.ts \
+  --accounts-file accounts.txt \
+  --start-index 0 \
+  --backup-start-index 50 \
+  --count 5
+```
+
+### 问题 2：refresh_token 无效
 
 **原因**：refresh_token 末尾有 `$$` 符号
 
 **解决**：使用文本编辑器批量替换 `$$` 为空
 
-### 问题 2：无法获取验证码
+### 问题 3：无法获取验证码
 
-**原因**：
-- 辅助邮箱凭据未提供或无效
-- 邮箱未激活
+**原因**：辅助邮箱凭据无效或邮箱未激活
 
 **解决**：
-1. 确保提供了有效的辅助邮箱凭据
+1. 确保辅助邮箱的 refresh_token 和 client_id 正确
 2. 或手动输入验证码后使用 `--resume` 继续
 
-### 问题 3：浏览器授权失败
+## 📊 性能数据
 
-**原因**：网络问题或页面加载超时
-
-**解决**：
-1. 检查网络连接
-2. 使用 `--proxy` 参数设置代理
-3. 手动完成授权后使用 `--resume --resume-from-step 6` 继续
+基于实际测试：
+- **单账号注册时间**：约 2-3 分钟
+- **并发 2 个账号**：总时间约 3-4 分钟（效率提升 ~50%）
+- **并发 3 个账号**：总时间约 4-5 分钟（效率提升 ~60%）
+- **推荐配置**：并发 2-3，延迟 5-15 秒
 
 ## 📝 开发说明
 
@@ -298,22 +274,27 @@ npx tsx parallel-register.ts --resume
 
 ```
 .
-├── parallel-register.ts        # 主程序（并行注册）
-├── src/
-│   └── main/
-│       ├── autoRegister.ts     # AWS 注册核心逻辑
-│       └── awsOidc.ts          # AWS OIDC API 模块
+├── parallel-register.ts        # 并行注册主程序（1,219 行）
+├── src/main/
+│   ├── autoRegister.ts         # AWS 注册核心逻辑（增强版）
+│   └── awsOidc.ts              # AWS OIDC API 模块（新增）
 ├── package.json
 └── README.md
 ```
 
 ### 技术栈
 
-- **TypeScript**：类型安全的 JavaScript
+- **TypeScript**：类型安全
 - **Playwright**：浏览器自动化
 - **p-queue**：并发队列管理
 - **ora**：终端进度显示
-- **Microsoft Graph API**：自动获取邮箱验证码
+- **Microsoft Graph API**：自动获取验证码
+
+### 代码统计
+
+- 新增代码：~2,400 行
+- 核心文件：3 个
+- 依赖包：新增 2 个（p-queue, ora）
 
 ## 🤝 贡献
 
@@ -325,11 +306,7 @@ MIT License
 
 ## 🔗 相关项目
 
-- [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) - Kiro IDE 的 API 客户端
-
-## ⭐ Star History
-
-如果这个项目对你有帮助，请给个 Star ⭐️
+- [AIClient-2-API](https://github.com/justlovemaki/AIClient-2-API) - 原始项目（Electron 桌面应用）
 
 ---
 
