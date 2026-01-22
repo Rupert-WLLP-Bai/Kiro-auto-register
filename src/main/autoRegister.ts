@@ -15,6 +15,59 @@ type LogCallback = (message: string) => void
 // ============ 人工介入和完成检测函数 ============
 
 /**
+ * 检测页面是否出现验证码或验证挑战
+ * @param page Playwright Page 对象
+ * @returns true 表示检测到验证码，false 表示未检测到
+ */
+async function detectCaptchaOrChallenge(page: Page): Promise<boolean> {
+  try {
+    // 检测常见的验证码元素
+    const captchaSelectors = [
+      'iframe[src*="captcha"]',
+      'iframe[src*="recaptcha"]',
+      'iframe[src*="hcaptcha"]',
+      '.g-recaptcha',
+      '#captcha',
+      '[class*="captcha"]',
+      '[id*="captcha"]',
+      // AWS 特定的验证元素
+      '[data-testid*="captcha"]',
+      '[data-testid*="challenge"]',
+      'img[alt*="captcha"]',
+      'img[alt*="verification"]'
+    ]
+
+    for (const selector of captchaSelectors) {
+      const element = await page.$(selector)
+      if (element) {
+        return true
+      }
+    }
+
+    // 检测 URL 是否包含验证相关关键词
+    const url = page.url()
+    if (url.includes('captcha') || url.includes('challenge') || url.includes('verify')) {
+      return true
+    }
+
+    // 检测页面文本是否包含验证相关内容
+    const bodyText = await page.textContent('body').catch(() => '')
+    if (bodyText && (
+      bodyText.includes('验证码') ||
+      bodyText.includes('Captcha') ||
+      bodyText.includes('verification') ||
+      bodyText.includes('challenge')
+    )) {
+      return true
+    }
+
+    return false
+  } catch (error) {
+    return false
+  }
+}
+
+/**
  * 检测 AWS 注册是否完成
  * @returns true 表示已完成，false 表示未完成
  */
@@ -223,6 +276,54 @@ async function humanType(page: Page, selector: string, text: string, description
     return true
   } catch (error) {
     return false
+  }
+}
+
+/**
+ * 对已定位的元素进行人类化填充
+ * @param page Playwright Page 对象
+ * @param element 已定位的元素
+ * @param value 要填充的值
+ * @param description 元素描述（用于日志）
+ */
+async function humanFillElement(
+  page: Page,
+  element: any,
+  value: string,
+  description: string
+): Promise<void> {
+  try {
+    // 获取元素位置并移动鼠标
+    const box = await element.boundingBox()
+    if (box) {
+      const clickX = box.x + box.width * (0.3 + Math.random() * 0.4)
+      const clickY = box.y + box.height * (0.3 + Math.random() * 0.4)
+      await humanMouseMove(page, clickX, clickY)
+    }
+
+    // 点击前的随机停顿
+    await page.waitForTimeout(randomDelay(200, 500))
+
+    // 点击元素
+    await element.click({ delay: randomDelay(50, 100) })
+
+    // 点击后的随机停顿
+    await page.waitForTimeout(randomDelay(100, 300))
+
+    // 清空输入框
+    await element.clear()
+    await page.waitForTimeout(randomDelay(50, 150))
+
+    // 逐字符输入
+    for (const char of value) {
+      await element.type(char, { delay: randomDelay(50, 150) })
+      // 10% 概率出现较长停顿（模拟思考）
+      if (Math.random() < 0.1) {
+        await page.waitForTimeout(randomDelay(200, 500))
+      }
+    }
+  } catch (error) {
+    throw new Error(`人类化填充 ${description} 失败: ${error}`)
   }
 }
 
@@ -718,14 +819,18 @@ async function waitAndClickWithRetry(
     const element = page.locator(selector).first()
     await element.waitFor({ state: 'visible', timeout })
 
-    // 模拟鼠标移动
+    // 使用贝塞尔曲线移动鼠标到随机位置
     const box = await element.boundingBox()
     if (box) {
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 })
+      // 随机点击位置（30-70% 区域）
+      const clickX = box.x + box.width * (0.3 + Math.random() * 0.4)
+      const clickY = box.y + box.height * (0.3 + Math.random() * 0.4)
+      // 使用贝塞尔曲线移动
+      await humanMouseMove(page, clickX, clickY)
     }
-    await page.waitForTimeout(Math.random() * 500 + 300)
+    await page.waitForTimeout(randomDelay(300, 800))
 
-    await element.click({ delay: Math.random() * 100 + 50 })
+    await element.click({ delay: randomDelay(50, 150) })
     log(`✓ 已点击${description}`)
 
     // 检查是否有错误弹窗，如果有则重试
@@ -774,7 +879,7 @@ export async function activateOutlook(
 
     await page.goto(activationUrl, { waitUntil: 'networkidle', timeout: 60000 })
     log('✓ 页面加载完成')
-    await page.waitForTimeout(2000)
+    await page.waitForTimeout(randomDelay(1800, 2200))
 
     // 步骤2: 等待邮箱输入框出现并输入邮箱
     log('\n步骤2: 输入邮箱...')
@@ -789,7 +894,7 @@ export async function activateOutlook(
       try {
         const element = page.locator(selector).first()
         await element.waitFor({ state: 'visible', timeout: 10000 })
-        await element.fill(email)
+        await humanFillElement(page, element, email, '邮箱')
         log(`✓ 已输入邮箱: ${email}`)
         emailFilled = true
         break
@@ -802,7 +907,7 @@ export async function activateOutlook(
       throw new Error('未找到邮箱输入框')
     }
 
-    await page.waitForTimeout(1000)
+    await page.waitForTimeout(randomDelay(800, 1200))
 
     // 步骤3: 点击第一个下一步按钮
     log('\n步骤3: 点击下一步按钮...')
@@ -816,7 +921,7 @@ export async function activateOutlook(
       throw new Error('点击第一个下一步按钮失败')
     }
 
-    await page.waitForTimeout(3000)
+    await page.waitForTimeout(randomDelay(2500, 3500))
 
     // 步骤4: 等待密码输入框出现并输入密码
     log('\n步骤4: 输入密码...')
@@ -832,7 +937,7 @@ export async function activateOutlook(
       try {
         const element = page.locator(selector).first()
         await element.waitFor({ state: 'visible', timeout: 15000 })
-        await element.fill(emailPassword)
+        await humanFillElement(page, element, emailPassword, '密码')
         log('✓ 已输入密码')
         passwordFilled = true
         break
@@ -845,7 +950,7 @@ export async function activateOutlook(
       throw new Error('未找到密码输入框')
     }
 
-    await page.waitForTimeout(1000)
+    await page.waitForTimeout(randomDelay(800, 1200))
 
     // 步骤5: 点击第二个下一步/登录按钮
     log('\n步骤5: 点击登录按钮...')
@@ -862,7 +967,7 @@ export async function activateOutlook(
       throw new Error('点击登录按钮失败')
     }
 
-    await page.waitForTimeout(3000)
+    await page.waitForTimeout(randomDelay(2500, 3500))
 
     // 新增步骤5.5: 检测并处理"添加安全信息"页面
     log('\n步骤5.5: 检测是否需要添加安全信息...')
@@ -886,13 +991,10 @@ export async function activateOutlook(
           const backupEmailToUse = backupEmail || 'backup.verify@outlook.com'
           log(`   输入备用邮箱: ${backupEmailToUse}`)
 
-          await element.click()
-          await page.waitForTimeout(200)
-          await element.clear()
-          await element.fill(backupEmailToUse)
+          await humanFillElement(page, element, backupEmailToUse, '备用邮箱')
           log('✓ 已输入备用邮箱')
 
-          await page.waitForTimeout(1000)
+          await page.waitForTimeout(randomDelay(800, 1200))
 
           // 点击"下一步"按钮
           const nextButtonSelectors = [
@@ -909,7 +1011,7 @@ export async function activateOutlook(
             if (backupEmailRefreshToken && backupEmailClientId) {
               // 等待更长时间让邮件到达（15秒）
               log('   等待 Microsoft 发送验证码邮件（15秒）...')
-              await page.waitForTimeout(15000)
+              await page.waitForTimeout(randomDelay(14000, 16000))
 
               log('   正在从备用邮箱获取验证码...')
               const securityCode = await getOutlookVerificationCode(
@@ -925,7 +1027,7 @@ export async function activateOutlook(
 
                 // 等待验证码输入框出现
                 log('   等待验证码输入框出现...')
-                await page.waitForTimeout(2000)
+                await page.waitForTimeout(randomDelay(1800, 2200))
 
                 // 输入验证码 - 使用更精确的选择器（优先使用最常见的类型）
                 const codeInputSelectors = [
@@ -978,14 +1080,14 @@ export async function activateOutlook(
 
                 if (!codeInputSuccess) {
                   log('⚠ 未找到验证码输入框，请手动输入')
-                  await page.waitForTimeout(30000)
+                  await page.waitForTimeout(randomDelay(28000, 32000))
                 } else {
-                  await page.waitForTimeout(1000)
+                  await page.waitForTimeout(randomDelay(800, 1200))
 
                   // 点击验证按钮
                   if (await tryClickSelectors(page, nextButtonSelectors, log, '验证按钮')) {
                     log('✓ 验证码验证成功')
-                    await page.waitForTimeout(3000)
+                    await page.waitForTimeout(randomDelay(2500, 3500))
 
                     // 处理"保持登录状态"提示
                     log('\n步骤5.6: 处理"保持登录状态"提示...')
@@ -1000,7 +1102,7 @@ export async function activateOutlook(
 
                     if (await tryClickSelectors(page, staySignedInSelectors, log, '"是"按钮（保持登录）', 10000)) {
                       log('✓ 已点击"是"按钮')
-                      await page.waitForTimeout(3000)
+                      await page.waitForTimeout(randomDelay(2500, 3500))
                     } else {
                       log('未找到"是"按钮，可能已跳过')
                     }
@@ -1008,12 +1110,12 @@ export async function activateOutlook(
                 }
               } else {
                 log('⚠ 无法自动获取验证码，需要手动处理')
-                await page.waitForTimeout(60000) // 等待60秒供手动操作
+                await page.waitForTimeout(randomDelay(58000, 62000)) // 等待60秒供手动操作
               }
             } else {
               log('⚠ 未提供备用邮箱凭据，无法自动获取验证码')
               log('   请手动在浏览器中完成验证...')
-              await page.waitForTimeout(30000) // 等待30秒供手动操作
+              await page.waitForTimeout(randomDelay(28000, 32000)) // 等待30秒供手动操作
             }
           }
 
@@ -1070,7 +1172,7 @@ export async function activateOutlook(
       log('⚠️ 无法确认 Outlook 邮箱是否完全加载，但继续执行')
     }
 
-    await page.waitForTimeout(1000)
+    await page.waitForTimeout(randomDelay(800, 1200))
     await browser.close()
     browser = null
 
@@ -1225,7 +1327,7 @@ export async function autoRegisterAWS(
     const registerUrl = 'https://view.awsapps.com/start/#/device?user_code=PQCF-FCCN'
     await page.goto(registerUrl, { waitUntil: 'networkidle', timeout: 60000 })
     log('✓ 页面加载完成')
-    await page.waitForTimeout(2000)
+    await page.waitForTimeout(randomDelay(1800, 2200))
 
     // 等待邮箱输入框出现并输入邮箱（使用人类行为模拟）
     // 选择器: input[placeholder="username@example.com"]
@@ -1234,7 +1336,7 @@ export async function autoRegisterAWS(
       throw new Error('未找到邮箱输入框')
     }
 
-    await page.waitForTimeout(1000)
+    await page.waitForTimeout(randomDelay(800, 1200))
 
     // 点击第一个继续按钮（带错误检测和自动重试）
     // 选择器: button[data-testid="test-primary-button"]
@@ -1243,7 +1345,7 @@ export async function autoRegisterAWS(
       throw new Error('点击第一个继续按钮失败')
     }
 
-    await page.waitForTimeout(3000)
+    await page.waitForTimeout(randomDelay(2500, 3500))
 
     // 检测是否是已注册账号（登录页面或验证页面）
     // 登录页面标识1: span 包含 "Sign in with your AWS Builder ID"
@@ -1344,7 +1446,7 @@ export async function autoRegisterAWS(
           throw new Error('未找到登录密码输入框')
         }
 
-        await page.waitForTimeout(1000)
+        await page.waitForTimeout(randomDelay(800, 1200))
 
         // 点击继续按钮
         const loginContinueSelector = 'button[data-testid="test-primary-button"]'
@@ -1352,7 +1454,7 @@ export async function autoRegisterAWS(
           throw new Error('点击登录继续按钮失败')
         }
 
-        await page.waitForTimeout(3000)
+        await page.waitForTimeout(randomDelay(2500, 3500))
       }
 
       // 步骤3(登录): 等待验证码输入框出现，获取并输入验证码
@@ -1380,7 +1482,7 @@ export async function autoRegisterAWS(
         throw new Error('未找到登录验证码输入框')
       }
 
-      await page.waitForTimeout(1000)
+      await page.waitForTimeout(randomDelay(800, 1200))
 
       // 自动获取验证码
       let loginVerificationCode: string | null = null
@@ -1399,7 +1501,7 @@ export async function autoRegisterAWS(
         throw new Error('输入登录验证码失败')
       }
 
-      await page.waitForTimeout(1000)
+      await page.waitForTimeout(randomDelay(800, 1200))
 
       // 点击验证码确认按钮
       const loginVerifySelector = 'button[data-testid="test-primary-button"]'
@@ -1407,7 +1509,7 @@ export async function autoRegisterAWS(
         throw new Error('点击登录验证码确认按钮失败')
       }
 
-      await page.waitForTimeout(5000)
+      await page.waitForTimeout(randomDelay(4500, 5500))
     } else {
       // ========== 注册流程（新账号）==========
       // 步骤2: 等待姓名输入框出现，输入姓名
@@ -1416,7 +1518,7 @@ export async function autoRegisterAWS(
         throw new Error('未找到姓名输入框')
       }
 
-      await page.waitForTimeout(Math.random() * 1000 + 500)
+      await page.waitForTimeout(randomDelay(500, 1500))
 
       // 使用更像人的点击方式提交
       const secondContinueSelector = 'button[data-testid="signup-next-button"]'
@@ -1425,15 +1527,15 @@ export async function autoRegisterAWS(
       }
 
       // 容错：如果点击后没动静（可能是因为姓名页有前端校验），强制模拟一次 Enter 键
-      await page.waitForTimeout(2000)
+      await page.waitForTimeout(randomDelay(1800, 2200))
       if (await page.locator(nameInputSelector).isVisible()) {
         log('检测到仍在姓名页面，尝试模拟 Enter 键提交...')
         await page.keyboard.press('Enter')
       }
 
-      await page.waitForTimeout(1000)
+      await page.waitForTimeout(randomDelay(800, 1200))
 
-      await page.waitForTimeout(3000)
+      await page.waitForTimeout(randomDelay(2500, 3500))
 
       // 步骤3: 等待验证码输入框出现，获取并输入验证码
       log('\n步骤3: 获取并输入验证码...')
@@ -1449,7 +1551,7 @@ export async function autoRegisterAWS(
         throw new Error('未找到验证码输入框')
       }
 
-      await page.waitForTimeout(1000)
+      await page.waitForTimeout(randomDelay(800, 1200))
 
       // 自动获取验证码
       let verificationCode: string | null = null
@@ -1468,7 +1570,7 @@ export async function autoRegisterAWS(
         throw new Error('输入验证码失败')
       }
 
-      await page.waitForTimeout(1000)
+      await page.waitForTimeout(randomDelay(800, 1200))
 
       // 点击 Continue 按钮（带错误检测和自动重试）
       // 选择器: button[data-testid="email-verification-verify-button"]
@@ -1477,7 +1579,7 @@ export async function autoRegisterAWS(
         throw new Error('点击 Continue 按钮失败')
       }
 
-      await page.waitForTimeout(3000)
+      await page.waitForTimeout(randomDelay(2500, 3500))
 
       // 步骤4: 等待密码输入框出现，输入密码
       log('\n步骤4: 输入密码...')
@@ -1487,7 +1589,7 @@ export async function autoRegisterAWS(
         throw new Error('未找到密码输入框')
       }
 
-      await page.waitForTimeout(500)
+      await page.waitForTimeout(randomDelay(400, 600))
 
       // 输入确认密码
       // 选择器: input[placeholder="Re-enter password"]
@@ -1496,7 +1598,7 @@ export async function autoRegisterAWS(
         throw new Error('未找到确认密码输入框')
       }
 
-      await page.waitForTimeout(1000)
+      await page.waitForTimeout(randomDelay(800, 1200))
 
       // 点击第三个继续按钮（带错误检测和自动重试）
       // 选择器: button[data-testid="test-primary-button"]
@@ -1505,14 +1607,36 @@ export async function autoRegisterAWS(
         throw new Error('点击第三个继续按钮失败')
       }
 
-      await page.waitForTimeout(5000)
+      await page.waitForTimeout(randomDelay(4500, 5500))
     }
 
     // 步骤5: 获取 SSO Token（登录和注册流程共用）
     log('\n步骤5: 获取 SSO Token...')
     let ssoToken: string | null = null
+    let captchaDetected = false
+    let popupDetected = false
+    let popupPage: Page | null = null
 
-    for (let i = 0; i < 30; i++) {
+    // 设置弹窗监听
+    context.on('page', async (newPage) => {
+      log('⚠️ 检测到新窗口打开，可能是验证挑战')
+      popupDetected = true
+      popupPage = newPage
+    })
+
+    // 增加等待时间到 120 次（2 分钟）
+    const maxAttempts = 120
+    for (let i = 0; i < maxAttempts; i++) {
+      // 检查是否有验证码（每 5 秒检测一次）
+      if (i % 5 === 0 && i > 0) {
+        captchaDetected = await detectCaptchaOrChallenge(page)
+        if (captchaDetected) {
+          log('⚠️ 检测到验证码或验证挑战')
+          break
+        }
+      }
+
+      // 检查 SSO Token
       const cookies = await context.cookies()
       const ssoCookie = cookies.find((c) => c.name === 'x-amz-sso_authn')
       if (ssoCookie) {
@@ -1520,10 +1644,46 @@ export async function autoRegisterAWS(
         log(`✓ 成功获取 SSO Token (x-amz-sso_authn)!`)
         break
       }
-      log(`等待 SSO Token... (${i + 1}/30)`)
-      await page.waitForTimeout(1000)
+
+      log(`等待 SSO Token... (${i + 1}/${maxAttempts})`)
+      await page.waitForTimeout(randomDelay(900, 1100))
     }
 
+    // 如果检测到弹窗，切换到弹窗页面
+    if (popupDetected && popupPage) {
+      log('切换到弹窗页面进行处理...')
+      const hasPopupCaptcha = await detectCaptchaOrChallenge(popupPage)
+      if (hasPopupCaptcha) {
+        log('⚠️ 弹窗中检测到验证码')
+        page = popupPage
+        captchaDetected = true
+      }
+    }
+
+    // 如果检测到验证码或弹窗，或者超时未获取到 token，触发人工介入
+    if (!ssoToken && (captchaDetected || popupDetected || true)) {
+      log('\n⚠️ 未能自动获取 SSO Token，可能需要人工介入')
+
+      // 使用现有的 waitForManualCompletion 函数
+      const manualCompleted = await waitForManualCompletion(
+        page,
+        checkAWSRegistrationComplete,
+        'AWS Builder ID 注册 - SSO Token 获取',
+        600 // 10 分钟
+      )
+
+      if (manualCompleted) {
+        // 重新尝试获取 SSO Token
+        const cookies = await context.cookies()
+        const ssoCookie = cookies.find((c) => c.name === 'x-amz-sso_authn')
+        if (ssoCookie) {
+          ssoToken = ssoCookie.value
+          log(`✓ 成功获取 SSO Token`)
+        }
+      }
+    }
+
+    // 只有在成功获取 token 或确认失败后才关闭浏览器
     await browser.close()
     browser = null
 
