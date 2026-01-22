@@ -65,9 +65,11 @@ interface Args {
   proxyUrl?: string
   backupAccountsFile?: string
   backupStartIndex?: number
+  backupMappingFile?: string
   resume?: boolean
   stateFile?: string
   resumeFromStep?: number
+  dryRun?: boolean
 }
 
 // ============ 状态管理 ============
@@ -210,7 +212,8 @@ function parseArgs(): Args {
     delayMax: 15,
     maxRetries: 2,
     skipActivation: false,
-    aiclientPath: '/Users/pejoyll/Desktop/code/2026/AIClient-2-API'
+    aiclientPath: '/Users/pejoyll/Desktop/code/2026/AIClient-2-API',
+    dryRun: false
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -265,6 +268,10 @@ function parseArgs(): Args {
         parsed.backupStartIndex = parseInt(nextArg)
         i++
         break
+      case '--backup-mapping-file':
+        parsed.backupMappingFile = nextArg
+        i++
+        break
       case '--resume':
         parsed.resume = true
         break
@@ -276,32 +283,70 @@ function parseArgs(): Args {
         parsed.resumeFromStep = parseInt(nextArg)
         i++
         break
+      case '--dry-run':
+        parsed.dryRun = true
+        break
     }
   }
 
-  // 验证必需参数（resume 模式下不需要所有参数）
-  if (!parsed.resume && (!parsed.accountsFile || parsed.startIndex === undefined || !parsed.count)) {
+  // 验证：映射文件和起始索引不能同时使用
+  if (parsed.backupMappingFile && parsed.backupStartIndex !== undefined) {
+    console.error('❌ --backup-mapping-file 和 --backup-start-index 不能同时使用')
+    process.exit(1)
+  }
+
+  // 验证：必须提供辅助邮箱配置
+  if (!parsed.resume && !parsed.dryRun && !parsed.backupMappingFile && parsed.backupStartIndex === undefined) {
+    console.error('❌ 必须提供辅助邮箱配置！')
+    console.error('   请使用 --backup-start-index 或 --backup-mapping-file 参数')
+    process.exit(1)
+  }
+
+  // 验证必需参数（resume 模式和 dry-run 模式下不需要所有参数）
+  if (!parsed.resume && !parsed.dryRun && (!parsed.accountsFile || parsed.startIndex === undefined || !parsed.count)) {
     console.error('❌ 缺少必需参数！')
     console.log('\n使用方法：')
-    console.log('\n1. 新任务：')
+    console.log('\n1. 新任务（必须配置辅助邮箱）：')
     console.log('npx tsx parallel-register.ts \\')
     console.log('  --accounts-file ids_cleaned.txt \\')
-    console.log('  --start-index 34 \\')
+    console.log('  --start-index 30 \\')
     console.log('  --count 5 \\')
+    console.log('  --backup-start-index 5 \\  # 必需：辅助邮箱起始索引')
     console.log('  [--concurrency 2] \\')
-    console.log('  [--aiclient-path /path/to/AIClient-2-API] (默认: /Users/pejoyll/Desktop/code/2026/AIClient-2-API) \\')
-    console.log('  [--delay-min 5] \\')
-    console.log('  [--delay-max 15] \\')
-    console.log('  [--max-retries 2] \\')
-    console.log('  [--skip-activation] \\')
-    console.log('  [--proxy http://127.0.0.1:7890] \\')
-    console.log('  [--backup-accounts-file backup-accounts.txt] \\')
-    console.log('  [--backup-start-index 0]')
-    console.log('\n2. 恢复任务：')
+    console.log('  [--aiclient-path /path/to/AIClient-2-API]')
+    console.log('\n2. 辅助邮箱配置（二选一，必需）：')
+    console.log('   a) 独立索引模式（同一文件）：')
+    console.log('      --backup-start-index 5')
+    console.log('   b) 独立文件模式：')
+    console.log('      --backup-accounts-file backup.txt \\')
+    console.log('      --backup-start-index 0')
+    console.log('   c) 自定义映射模式：')
+    console.log('      --backup-mapping-file mapping.txt')
+    console.log('\n3. 映射文件格式（mapping.txt）：')
+    console.log('   # 主邮箱索引:辅助邮箱索引')
+    console.log('   30:5')
+    console.log('   31:10')
+    console.log('   32:15')
+    console.log('\n4. 恢复任务：')
     console.log('npx tsx parallel-register.ts \\')
     console.log('  --resume \\')
     console.log('  [--state-file .parallel-register-state.json] \\')
     console.log('  [--resume-from-step 3]')
+    console.log('\n5. 预览配置（Dry Run）：')
+    console.log('npx tsx parallel-register.ts \\')
+    console.log('  --accounts-file ids_cleaned.txt \\')
+    console.log('  --start-index 30 \\')
+    console.log('  --backup-start-index 5 \\')
+    console.log('  --count 5 \\')
+    console.log('  --dry-run')
+    console.log('\n示例：')
+    console.log('# 独立索引（同一文件）')
+    console.log('npx tsx parallel-register.ts --accounts-file ids.txt --start-index 30 --backup-start-index 5 --count 3')
+    console.log('\n# 独立文件')
+    console.log('npx tsx parallel-register.ts --accounts-file main.txt --start-index 0 --backup-accounts-file backup.txt --backup-start-index 10 --count 3')
+    console.log('\n# 自定义映射')
+    console.log('npx tsx parallel-register.ts --accounts-file ids.txt --backup-mapping-file mapping.txt --count 3')
+    console.log('\n⚠️  注意：为了安全性，必须配置辅助邮箱！')
     process.exit(1)
   }
 
@@ -318,13 +363,55 @@ function log(message: string): void {
   console.log(`[${timestamp}] ${message}`)
 }
 
+/**
+ * 加载辅助邮箱映射文件
+ * 格式：每行一对映射关系 "mainIndex:backupIndex"
+ * 示例：
+ *   30:5
+ *   31:10
+ *   32:15
+ */
+async function loadBackupMapping(filePath: string): Promise<Map<number, number>> {
+  log(`📋 加载辅助邮箱映射文件: ${filePath}`)
+
+  const content = await fs.readFile(filePath, 'utf-8')
+  const lines = content.split('\n').filter(line => line.trim())
+
+  const mapping = new Map<number, number>()
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line || line.startsWith('#')) continue // 跳过空行和注释
+
+    const parts = line.split(':')
+    if (parts.length !== 2) {
+      log(`⚠️ 跳过格式错误的映射行 ${i + 1}: ${line}`)
+      continue
+    }
+
+    const mainIndex = parseInt(parts[0].trim())
+    const backupIndex = parseInt(parts[1].trim())
+
+    if (isNaN(mainIndex) || isNaN(backupIndex)) {
+      log(`⚠️ 跳过无效的索引值 ${i + 1}: ${line}`)
+      continue
+    }
+
+    mapping.set(mainIndex, backupIndex)
+  }
+
+  log(`✅ 成功加载 ${mapping.size} 条映射关系`)
+  return mapping
+}
+
 // ============ 读取账号数据 ============
 async function loadAccounts(
   mainFile: string,
   mainStartIndex: number,
   count: number,
   backupFile?: string,
-  backupStartIndex?: number
+  backupStartIndex?: number,
+  backupMapping?: Map<number, number>
 ): Promise<AccountData[]> {
   log('📋 加载账号数据...')
 
@@ -333,31 +420,37 @@ async function loadAccounts(
   const mainLines = mainContent.split('\n').filter(line => line.trim())
   log(`   主邮箱文件: ${mainFile} (共 ${mainLines.length} 行)`)
 
-  // 加载辅助邮箱数据（如果提供）
-  let backupLines: string[] = []
+  // 加载辅助邮箱数据
+  const backupFilePath = backupFile ?? mainFile
+  const backupContent = await fs.readFile(backupFilePath, 'utf-8')
+  const backupLines = backupContent.split('\n').filter(line => line.trim())
+
   if (backupFile) {
-    const backupContent = await fs.readFile(backupFile, 'utf-8')
-    backupLines = backupContent.split('\n').filter(line => line.trim())
     log(`   辅助邮箱文件: ${backupFile} (共 ${backupLines.length} 行)`)
+  } else {
+    log(`   辅助邮箱文件: 同主邮箱文件`)
   }
 
   const accounts: AccountData[] = []
-  const actualBackupStartIndex = backupStartIndex ?? mainStartIndex
 
-  log(`   主邮箱起始索引: ${mainStartIndex}`)
-  if (backupFile) {
-    log(`   辅助邮箱起始索引: ${actualBackupStartIndex}`)
+  // 确定模式
+  if (backupMapping) {
+    log(`   模式: 自定义映射`)
+  } else {
+    log(`   模式: 独立索引`)
+    log(`   主邮箱起始索引: ${mainStartIndex}`)
+    log(`   辅助邮箱起始索引: ${backupStartIndex}`)
   }
 
   for (let i = 0; i < count; i++) {
     const mainIndex = mainStartIndex + i
-    const backupIndex = actualBackupStartIndex + i
 
     if (mainIndex >= mainLines.length) {
       log(`⚠️ 主邮箱索引 ${mainIndex} 超出范围，停止加载`)
       break
     }
 
+    // 解析主邮箱
     const mainLine = mainLines[mainIndex].trim()
     if (!mainLine) continue
 
@@ -374,34 +467,36 @@ async function loadAccounts(
       clientId: mainParts[3].trim()
     }
 
-    // 如果有独立的辅助邮箱文件，从中读取
-    if (backupFile && backupIndex < backupLines.length) {
+    // 确定辅助邮箱索引
+    let backupIndex: number | null = null
+
+    if (backupMapping) {
+      // 模式B：使用自定义映射
+      backupIndex = backupMapping.get(mainIndex) ?? null
+    } else {
+      // 模式A：使用独立起始索引
+      backupIndex = backupStartIndex! + i
+    }
+
+    // 加载辅助邮箱
+    if (backupIndex !== null && backupIndex < backupLines.length) {
       const backupLine = backupLines[backupIndex].trim()
       if (backupLine) {
         const backupParts = backupLine.split('|')
-        if (backupParts.length >= 3) {
+        if (backupParts.length >= 4) {
           account.backupEmail = backupParts[0].trim()
-          account.backupRefreshToken = backupParts[1].trim()
-          account.backupClientId = backupParts[2].trim()
-          log(`   ✓ [${i + 1}] 主邮箱: ${account.email} + 辅助邮箱: ${account.backupEmail}`)
+          account.backupRefreshToken = backupParts[2].trim()
+          account.backupClientId = backupParts[3].trim()
+          log(`   ✓ [${i + 1}] 主邮箱: ${account.email} (行${mainIndex}) + 辅助邮箱: ${account.backupEmail} (行${backupIndex})`)
         } else {
-          log(`   ⚠️ 辅助邮箱行 ${backupIndex} 格式错误: ${backupLine}`)
-          log(`   ✓ [${i + 1}] 主邮箱: ${account.email} (无辅助邮箱)`)
+          log(`   ⚠️ 辅助邮箱行 ${backupIndex} 格式错误`)
+          log(`   ⚠️ [${i + 1}] 主邮箱: ${account.email} (行${mainIndex}) - 辅助邮箱加载失败`)
         }
-      }
-    }
-    // 否则尝试从主文件的第 4-6 列读取（兼容旧格式）
-    else if (mainParts.length >= 7) {
-      account.backupEmail = mainParts[4]?.trim()
-      account.backupRefreshToken = mainParts[5]?.trim()
-      account.backupClientId = mainParts[6]?.trim()
-      if (account.backupEmail) {
-        log(`   ✓ [${i + 1}] 主邮箱: ${account.email} + 辅助邮箱: ${account.backupEmail} (从主文件)`)
       } else {
-        log(`   ✓ [${i + 1}] 主邮箱: ${account.email} (无辅助邮箱)`)
+        log(`   ⚠️ [${i + 1}] 主邮箱: ${account.email} (行${mainIndex}) - 辅助邮箱行为空`)
       }
     } else {
-      log(`   ✓ [${i + 1}] 主邮箱: ${account.email} (无辅助邮箱)`)
+      log(`   ⚠️ [${i + 1}] 主邮箱: ${account.email} (行${mainIndex}) - 辅助邮箱索引 ${backupIndex} 超出范围`)
     }
 
     accounts.push(account)
@@ -929,14 +1024,96 @@ async function main() {
     })
   }
 
+  // 加载辅助邮箱映射（如果提供）
+  let backupMapping: Map<number, number> | undefined
+  if (args.backupMappingFile) {
+    backupMapping = await loadBackupMapping(args.backupMappingFile)
+  }
+
   // 加载账号数据
   const accounts = await loadAccounts(
     args.accountsFile,
     args.startIndex,
     args.count,
     args.backupAccountsFile,
-    args.backupStartIndex
+    args.backupStartIndex,
+    backupMapping
   )
+
+  // Dry Run 模式：仅显示配置信息，不执行注册
+  if (args.dryRun) {
+    log('\n🔍 Dry Run 模式 - 预览配置\n')
+    log('========== 配置信息 ==========')
+    log(`账号文件: ${args.accountsFile}`)
+    log(`起始索引: ${args.startIndex}`)
+    log(`注册数量: ${args.count}`)
+    log(`并发数: ${args.concurrency}`)
+    log(`延迟范围: ${args.delayMin}-${args.delayMax} 秒`)
+    log(`最大重试: ${args.maxRetries}`)
+    log(`AIClient 路径: ${args.aiclientPath}`)
+    log(`跳过激活: ${args.skipActivation ? '是' : '否'}`)
+    if (args.proxyUrl) {
+      log(`代理: ${args.proxyUrl}`)
+    }
+
+    log('\n========== 辅助邮箱配置 ==========')
+    if (args.backupMappingFile) {
+      log(`模式: 自定义映射`)
+      log(`映射文件: ${args.backupMappingFile}`)
+    } else {
+      log(`模式: 独立索引`)
+      log(`辅助邮箱起始索引: ${args.backupStartIndex}`)
+      if (args.backupAccountsFile) {
+        log(`辅助邮箱文件: ${args.backupAccountsFile}`)
+      } else {
+        log(`辅助邮箱文件: 同主邮箱文件`)
+      }
+    }
+
+    log('\n========== 账号列表 ==========')
+    log(`总计: ${accounts.length} 个账号\n`)
+
+    accounts.forEach((account, index) => {
+      const taskId = `task-${args.startIndex + index}`
+      log(`[${taskId}]`)
+      log(`  主邮箱: ${account.email}`)
+      log(`  密码: ${account.password}`)
+      log(`  Refresh Token: ${account.refreshToken.substring(0, 20)}...`)
+      log(`  Client ID: ${account.clientId.substring(0, 20)}...`)
+
+      if (account.backupEmail) {
+        log(`  辅助邮箱: ${account.backupEmail}`)
+        log(`  辅助 Refresh Token: ${account.backupRefreshToken?.substring(0, 20)}...`)
+        log(`  辅助 Client ID: ${account.backupClientId?.substring(0, 20)}...`)
+      } else {
+        log(`  辅助邮箱: (无)`)
+      }
+      log('')
+    })
+
+    log('========== 索引对应关系 ==========')
+    const mainContent = await fs.readFile(args.accountsFile, 'utf-8')
+    const mainLines = mainContent.split('\n').filter(line => line.trim())
+
+    accounts.forEach((account, index) => {
+      const mainIndex = args.startIndex + index
+      let backupIndexDisplay = '无'
+
+      if (account.backupEmail) {
+        // 查找辅助邮箱在文件中的索引
+        const backupLineIndex = mainLines.findIndex(line => line.includes(account.backupEmail!))
+        if (backupLineIndex !== -1) {
+          backupIndexDisplay = `行${backupLineIndex}`
+        }
+      }
+
+      log(`[${index + 1}] 主邮箱: 行${mainIndex} (${account.email}) → 辅助邮箱: ${backupIndexDisplay}${account.backupEmail ? ` (${account.backupEmail})` : ''}`)
+    })
+
+    log('\n✅ Dry Run 完成！')
+    log('💡 移除 --dry-run 参数即可开始实际注册')
+    return
+  }
 
   // 初始化组件
   const browserPool = new BrowserPool(args.proxyUrl)
