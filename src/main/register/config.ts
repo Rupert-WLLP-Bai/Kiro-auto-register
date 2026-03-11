@@ -10,40 +10,8 @@ interface LoadRegisterConfigOptions {
   env?: NodeJS.ProcessEnv
 }
 
-function stripOptionalQuotes(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1)
-  }
-
-  return value
-}
-
-function parseDotEnv(text: string): Record<string, string> {
-  const values: Record<string, string> = {}
-
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) {
-      continue
-    }
-
-    const separatorIndex = trimmed.indexOf('=')
-    if (separatorIndex === -1) {
-      continue
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim()
-    const value = stripOptionalQuotes(trimmed.slice(separatorIndex + 1).trim())
-
-    if (key) {
-      values[key] = value
-    }
-  }
-
-  return values
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error
 }
 
 async function readDotEnv(cwd: string): Promise<Record<string, string>> {
@@ -51,9 +19,30 @@ async function readDotEnv(cwd: string): Promise<Record<string, string>> {
 
   try {
     const content = await readFile(envPath, 'utf8')
-    return parseDotEnv(content)
+    const values: Record<string, string> = {}
+
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) {
+        continue
+      }
+
+      const separatorIndex = trimmed.indexOf('=')
+      if (separatorIndex === -1) {
+        continue
+      }
+
+      const key = trimmed.slice(0, separatorIndex).trim()
+      const value = trimmed.slice(separatorIndex + 1).trim()
+
+      if (key) {
+        values[key] = value
+      }
+    }
+
+    return values
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isNodeError(error) && error.code === 'ENOENT') {
       return {}
     }
 

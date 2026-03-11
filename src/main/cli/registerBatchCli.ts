@@ -1,11 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, resolve } from 'node:path'
 
 import { loadRegisterAccountsFile } from '../register/accountsFile.ts'
 import { runBatchRegistration } from '../register/batch.ts'
 import { loadRegisterConfig } from '../register/config.ts'
 import type { BatchResult, InvalidRegisterEntry, RegisterOptions } from '../register/types.ts'
 import { registerOneWithPlaywright } from '../register/service.ts'
+
+const PRINT_USAGE = Symbol('printUsage')
 
 interface CliDependencies {
   cwd?: string
@@ -35,10 +37,6 @@ function printUsage(write: (line: string) => void): void {
 
 function defaultTimestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-')
-}
-
-function resolvePath(cwd: string, filePath: string): string {
-  return isAbsolute(filePath) ? filePath : join(cwd, filePath)
 }
 
 function toJsonOutput(
@@ -101,7 +99,7 @@ function parseCliArgs(argv: string[]): CliArgs {
     } else if (arg === '--fail-out') {
       parsed.failOutPath = argv[++index] ?? ''
     } else if (arg === '--help' || arg === '-h') {
-      throw new Error('__PRINT_USAGE__')
+      throw PRINT_USAGE
     } else {
       throw new Error(`Unknown argument: ${arg}`)
     }
@@ -147,7 +145,7 @@ export async function runRegisterBatchCli(
   try {
     args = parseCliArgs(argv)
   } catch (error) {
-    if (error instanceof Error && error.message === '__PRINT_USAGE__') {
+    if (error === PRINT_USAGE) {
       printUsage(stdout)
       return 0
     }
@@ -159,7 +157,7 @@ export async function runRegisterBatchCli(
 
   try {
     const config = await loadConfigFn({ cwd, env: process.env })
-    const parsed = await loadAccountsFileFn(resolvePath(cwd, args.inputPath))
+    const parsed = await loadAccountsFileFn(resolve(cwd, args.inputPath))
     const batchOptions: RegisterOptions = {
       registrationPassword: config.registrationPassword,
       skipOutlookActivation: args.skipOutlookActivation,
@@ -176,24 +174,26 @@ export async function runRegisterBatchCli(
     })
 
     const timestamp = defaultTimestamp()
-    const outPath = resolvePath(cwd, args.outPath || `register-results-${timestamp}.json`)
-    const successOutPath = resolvePath(
+    const outPath = resolve(cwd, args.outPath || `register-results-${timestamp}.json`)
+    const successOutPath = resolve(
       cwd,
       args.successOutPath || `register-success-${timestamp}.txt`
     )
-    const failOutPath = resolvePath(cwd, args.failOutPath || `register-failed-${timestamp}.txt`)
+    const failOutPath = resolve(cwd, args.failOutPath || `register-failed-${timestamp}.txt`)
 
-    await writeOutputFile(
-      outPath,
-      JSON.stringify(toJsonOutput(batchResult, parsed.invalidEntries), null, 2),
-      writeTextFile
-    )
-    await writeOutputFile(successOutPath, formatSuccessLines(batchResult), writeTextFile)
-    await writeOutputFile(
-      failOutPath,
-      formatFailureLines(batchResult, parsed.invalidEntries),
-      writeTextFile
-    )
+    await Promise.all([
+      writeOutputFile(
+        outPath,
+        JSON.stringify(toJsonOutput(batchResult, parsed.invalidEntries), null, 2),
+        writeTextFile
+      ),
+      writeOutputFile(successOutPath, formatSuccessLines(batchResult), writeTextFile),
+      writeOutputFile(
+        failOutPath,
+        formatFailureLines(batchResult, parsed.invalidEntries),
+        writeTextFile
+      )
+    ])
 
     const totalFailures = batchResult.failedCount + parsed.invalidEntries.length
     stdout(

@@ -34,8 +34,6 @@ export async function runBatchRegistration(
   const results: RegisterResult[] = new Array(inputs.length)
   let cursor = 0
   let completed = 0
-  let successCount = 0
-  let failedCount = 0
 
   const runNext = async (): Promise<void> => {
     const index = cursor
@@ -59,20 +57,16 @@ export async function runBatchRegistration(
       })
 
       results[index] = result
-      if (result.success) {
-        successCount += 1
-      } else {
-        failedCount += 1
-      }
     } catch (error) {
       results[index] = createFailureResult(
         input.email,
         startedAt,
         error instanceof Error ? error.message : String(error)
       )
-      failedCount += 1
     } finally {
       completed += 1
+      const successCount = results.slice(0, completed).filter(r => r.success).length
+      const failedCount = completed - successCount
       options.onProgress?.({
         completed,
         total: inputs.length,
@@ -87,10 +81,11 @@ export async function runBatchRegistration(
     Array.from({ length: Math.min(concurrency, inputs.length) }, () => runNext())
   )
 
+  const successCount = results.filter(r => r.success).length
   return {
     total: inputs.length,
     successCount,
-    failedCount,
+    failedCount: inputs.length - successCount,
     results
   }
 }

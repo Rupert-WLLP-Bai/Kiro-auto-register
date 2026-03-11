@@ -1,11 +1,11 @@
 import type { RegisterInput, RegisterOptions, RegisterResult } from './types.ts'
+import { autoRegisterAWS } from '../autoRegister.ts'
 
 export async function registerOneWithPlaywright(
   input: RegisterInput,
   options: RegisterOptions & { onLog?: (message: string) => void }
 ): Promise<RegisterResult> {
   const startedAt = Date.now()
-  const { autoRegisterAWS } = await import('../autoRegister.ts')
 
   const result = await autoRegisterAWS(
     input.email,
