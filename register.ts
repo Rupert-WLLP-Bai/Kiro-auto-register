@@ -2,19 +2,19 @@
  * 上层注册脚本 - 通过账号序号简化调用
  *
  * 使用方法：
- * npx tsx register.ts <主账号序号> <辅助账号序号>
+ * bun run register.ts <主账号序号> <辅助账号序号>
  *
  * 示例：
- * npx tsx register.ts 27 3
+ * bun run register.ts 27 3
  */
 
 import * as fs from 'fs'
 import * as readline from 'readline'
 import { activateOutlook, autoRegisterAWS } from './src/main/autoRegister'
+import { loadRegisterConfig } from './src/main/register/config'
 
 // 固定配置
 const AICLIENT_PATH = '/Users/pejoyll/Desktop/code/2026/AIClient-2-API'
-const AWS_PASSWORD = 'admin123456aA!'
 const ACCOUNTS_FILE = 'ids_cleaned.txt'
 
 // 账号信息接口
@@ -115,9 +115,9 @@ function parseArgs(): { mainIndex: number; backupIndex: number } {
   if (args.length < 2) {
     console.error('❌ 参数不足！\n')
     console.log('使用方法：')
-    console.log('  npx tsx register.ts <主账号序号> <辅助账号序号>\n')
+    console.log('  bun run register.ts <主账号序号> <辅助账号序号>\n')
     console.log('示例：')
-    console.log('  npx tsx register.ts 27 3\n')
+    console.log('  bun run register.ts 27 3\n')
     console.log('说明：')
     console.log('  - 序号从 0 开始计数')
     console.log('  - 主账号用于注册 AWS Builder ID')
@@ -150,6 +150,8 @@ async function executeBatchRegister(
   log(`   AIClient 路径: ${AICLIENT_PATH}`)
 
   try {
+    const { registrationPassword } = await loadRegisterConfig()
+
     // 步骤 1: 激活 Outlook 邮箱
     log('\n📧 步骤 1: 激活 Outlook 邮箱')
     const activationResult = await activateOutlook(
@@ -178,12 +180,13 @@ async function executeBatchRegister(
       mainAccount.refreshToken,
       mainAccount.clientId,
       log,
-      AWS_PASSWORD,
+      mainAccount.password,
       true, // 跳过第二次激活
       undefined, // 不使用代理
       backupAccount.email,
       backupAccount.refreshToken,
-      backupAccount.clientId
+      backupAccount.clientId,
+      registrationPassword
     )
 
     if (!registerResult.success) {
@@ -215,7 +218,7 @@ async function executeBatchRegister(
     await (batchRegister as any).autoAuthorize(
       authData.verificationUriComplete,
       mainAccount.email,
-      AWS_PASSWORD,
+      registrationPassword,
       mainAccount.refreshToken,
       mainAccount.clientId
     )

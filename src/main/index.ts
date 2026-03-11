@@ -1,11 +1,13 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import * as machineIdModule from './machineId'
+import { loadRegisterConfig } from './register/config.ts'
+import { registerOneWithPlaywright } from './register/service.ts'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { writeFile, readFile } from 'fs/promises'
 import { encode, decode } from 'cbor-x'
-import icon from '../../resources/icon.png?asset'
+import icon from '../renderer/src/assets/kiro-high-resolution-logo-transparent.png?asset'
 
 // ============ 自动更新配置 ============
 autoUpdater.autoDownload = false // 不自动下载更新
@@ -3750,11 +3752,6 @@ app.whenReady().then(() => {
       console.log('[OutlookCode] ========== 开始获取验证码 ==========')
       console.log('[OutlookCode] email:', params.email)
       console.log('[OutlookCode] clientId:', params.clientId)
-      console.log(
-        '[OutlookCode] refreshToken:',
-        params.refreshToken ? `${params.refreshToken.substring(0, 30)}...` : 'EMPTY'
-      )
-
       if (!params.refreshToken || !params.clientId) {
         console.error('[OutlookCode] 缺少必要参数')
         return { success: false, error: '缺少 refresh_token 或 client_id' }
@@ -4000,9 +3997,6 @@ app.whenReady().then(() => {
         console.log('[AutoRegister] Using proxy:', params.proxyUrl)
       }
 
-      // 动态导入自动注册模块
-      const { autoRegisterAWS } = await import('./autoRegister')
-
       // 日志回调
       const sendLog = (message: string) => {
         console.log('[AutoRegister]', message)
@@ -4010,14 +4004,20 @@ app.whenReady().then(() => {
       }
 
       try {
-        const result = await autoRegisterAWS(
-          params.email,
-          params.refreshToken,
-          params.clientId,
-          sendLog,
-          params.emailPassword,
-          params.skipOutlookActivation || false,
-          params.proxyUrl
+        const config = await loadRegisterConfig()
+        const result = await registerOneWithPlaywright(
+          {
+            email: params.email,
+            emailPassword: params.emailPassword,
+            refreshToken: params.refreshToken,
+            clientId: params.clientId
+          },
+          {
+            registrationPassword: config.registrationPassword,
+            skipOutlookActivation: params.skipOutlookActivation || false,
+            proxyUrl: params.proxyUrl,
+            onLog: sendLog
+          }
         )
 
         return result

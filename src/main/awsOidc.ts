@@ -3,7 +3,7 @@
  * 提供 AWS Builder ID 的 OIDC 认证功能
  */
 
-import { Browser, BrowserContext, Page } from 'playwright'
+import { BrowserContext, Page } from 'playwright'
 import { getOutlookVerificationCode } from './autoRegister'
 
 // 日志回调类型
@@ -553,12 +553,11 @@ export async function autoAuthorize(
     if (isTimeout) {
       log(`\n⚠️  检测到超时，等待人工完成授权...`)
 
-      const manualCompleted = await waitForManualCompletion(
-        page,
-        checkAuthorizationComplete,
-        '浏览器授权',
-        600
-      )
+      if (!page) {
+        throw error
+      }
+
+      const manualCompleted = await waitForManualCompletion(page, checkAuthorizationComplete, '浏览器授权', 600)
 
       if (manualCompleted) {
         log(`✅ 授权完成`)

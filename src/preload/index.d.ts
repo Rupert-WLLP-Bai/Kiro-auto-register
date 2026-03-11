@@ -181,6 +181,7 @@ interface KiroApi {
   exportToFile: (data: string, filename: string) => Promise<boolean>
   exportToFolder: (files: Array<{ filename: string; content: string }>) => Promise<{ success: boolean; count: number; folder?: string; error?: string }>
   importFromFile: () => Promise<{ content: string; format: string } | { files: Array<{ content: string; format: string; path: string }>; isMultiple: true } | null>
+  writeFile: (filename: string, content: string) => Promise<{ success: boolean; path?: string; error?: string }>
 
   // 验证凭证并获取账号信息
   verifyAccountCredentials: (credentials: {

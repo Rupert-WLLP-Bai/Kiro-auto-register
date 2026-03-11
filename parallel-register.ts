@@ -9,7 +9,7 @@
  * 5. 任务间随机延迟启动
  *
  * 使用方法：
- * npx tsx parallel-register.ts \
+ * bun run parallel-register.ts \
  *   --accounts-file ids_cleaned.txt \
  *   --start-index 34 \
  *   --count 5 \
@@ -24,6 +24,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { activateOutlook, autoRegisterAWS } from './src/main/autoRegister'
 import { registerClient, deviceAuthorization, pollToken, autoAuthorize } from './src/main/awsOidc'
+import { loadRegisterConfig } from './src/main/register/config'
 
 // ============ 类型定义 ============
 interface AccountData {
@@ -307,7 +308,7 @@ function parseArgs(): Args {
     console.error('❌ 缺少必需参数！')
     console.log('\n使用方法：')
     console.log('\n1. 新任务（必须配置辅助邮箱）：')
-    console.log('npx tsx parallel-register.ts \\')
+    console.log('bun run parallel-register.ts \\')
     console.log('  --accounts-file ids_cleaned.txt \\')
     console.log('  --start-index 30 \\')
     console.log('  --count 5 \\')
@@ -328,12 +329,12 @@ function parseArgs(): Args {
     console.log('   31:10')
     console.log('   32:15')
     console.log('\n4. 恢复任务：')
-    console.log('npx tsx parallel-register.ts \\')
+    console.log('bun run parallel-register.ts \\')
     console.log('  --resume \\')
     console.log('  [--state-file .parallel-register-state.json] \\')
     console.log('  [--resume-from-step 3]')
     console.log('\n5. 预览配置（Dry Run）：')
-    console.log('npx tsx parallel-register.ts \\')
+    console.log('bun run parallel-register.ts \\')
     console.log('  --accounts-file ids_cleaned.txt \\')
     console.log('  --start-index 30 \\')
     console.log('  --backup-start-index 5 \\')
@@ -341,11 +342,11 @@ function parseArgs(): Args {
     console.log('  --dry-run')
     console.log('\n示例：')
     console.log('# 独立索引（同一文件）')
-    console.log('npx tsx parallel-register.ts --accounts-file ids.txt --start-index 30 --backup-start-index 5 --count 3')
+    console.log('bun run parallel-register.ts --accounts-file ids.txt --start-index 30 --backup-start-index 5 --count 3')
     console.log('\n# 独立文件')
-    console.log('npx tsx parallel-register.ts --accounts-file main.txt --start-index 0 --backup-accounts-file backup.txt --backup-start-index 10 --count 3')
+    console.log('bun run parallel-register.ts --accounts-file main.txt --start-index 0 --backup-accounts-file backup.txt --backup-start-index 10 --count 3')
     console.log('\n# 自定义映射')
-    console.log('npx tsx parallel-register.ts --accounts-file ids.txt --backup-mapping-file mapping.txt --count 3')
+    console.log('bun run parallel-register.ts --accounts-file ids.txt --backup-mapping-file mapping.txt --count 3')
     console.log('\n⚠️  注意：为了安全性，必须配置辅助邮箱！')
     process.exit(1)
   }
@@ -630,6 +631,7 @@ async function executeRegistration(
   stateManager: StateManager,
   args: Args
 ): Promise<TaskResult> {
+  const { registrationPassword } = await loadRegisterConfig()
   const { account } = task
   const taskLogger = (message: string) => {
     log(`[${account.email}] ${message}`)
@@ -713,7 +715,8 @@ async function executeRegistration(
         args.proxyUrl,
         account.backupEmail,
         account.backupRefreshToken,
-        account.backupClientId
+        account.backupClientId,
+        registrationPassword
       )
 
       if (!registerResult.success) {
@@ -740,7 +743,7 @@ async function executeRegistration(
           log(`   步骤: 步骤2 - AWS Builder ID 注册`)
           log(`   原因: ${registerResult.error}`)
           log(`   操作: 请手动完成注册后，使用以下命令继续:`)
-          log(`   npx tsx parallel-register.ts --resume --resume-from-step 3\n`)
+          log(`   bun run parallel-register.ts --resume --resume-from-step 3\n`)
 
           throw new Error(`AWS 注册失败: ${registerResult.error}`)
         }
@@ -806,7 +809,7 @@ async function executeRegistration(
           context,
           authData!.verificationUriComplete,
           account.email,
-          'admin123456aA!', // 固定密码
+          registrationPassword,
           account.refreshToken,
           account.clientId,
           taskLogger
@@ -841,7 +844,7 @@ async function executeRegistration(
           log(`   步骤: 步骤5 - 浏览器授权`)
           log(`   原因: ${error}`)
           log(`   操作: 请在浏览器中手动完成授权后，使用以下命令继续:`)
-          log(`   npx tsx parallel-register.ts --resume --resume-from-step 6\n`)
+          log(`   bun run parallel-register.ts --resume --resume-from-step 6\n`)
 
           throw error
         }
@@ -1227,7 +1230,7 @@ async function main() {
         log(`     原因: ${t.pauseMessage}`)
       })
       log(`\n💡 使用以下命令继续:`)
-      log(`   npx tsx parallel-register.ts --resume`)
+      log(`   bun run parallel-register.ts --resume`)
     }
   }
 

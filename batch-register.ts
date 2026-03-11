@@ -8,13 +8,14 @@
  * 4. 保存到 AIClient-2-API configs/kiro 目录
  *
  * 使用方法：
- * npx tsx batch-register.ts --email xxx@outlook.com --password xxx --refresh-token xxx --client-id xxx --aiclient-path /path/to/AIClient-2-API
+ * bun run batch-register.ts --email xxx@outlook.com --password xxx --refresh-token xxx --client-id xxx --aiclient-path /path/to/AIClient-2-API
  */
 
 import { activateOutlook, autoRegisterAWS } from './src/main/autoRegister'
 import { chromium, Browser } from 'playwright'
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import { loadRegisterConfig } from './src/main/register/config'
 
 // ============ 命令行参数解析 ============
 interface Args {
@@ -85,7 +86,7 @@ function parseArgs(): Args {
   if (!parsed.email || !parsed.refreshToken || !parsed.clientId || !parsed.aiclientPath) {
     console.error('❌ 缺少必需参数！')
     console.log('\n使用方法：')
-    console.log('npx tsx batch-register.ts \\')
+    console.log('bun run batch-register.ts \\')
     console.log('  --email xxx@outlook.com \\')
     console.log('  --password xxx \\')
     console.log('  --refresh-token xxx \\')
@@ -644,6 +645,8 @@ async function main() {
   log(`   AIClient 路径: ${args.aiclientPath}`)
 
   try {
+    const { registrationPassword } = await loadRegisterConfig()
+
     // 步骤 1: 激活 Outlook（如果需要）
     if (!args.skipActivation && args.email.toLowerCase().includes('outlook') && args.password) {
       log('\n📧 步骤 1: 激活 Outlook 邮箱')
@@ -681,7 +684,8 @@ async function main() {
       args.proxyUrl,
       args.backupEmail,
       args.backupRefreshToken,
-      args.backupClientId
+      args.backupClientId,
+      registrationPassword
     )
 
     if (!registerResult.success) {
@@ -710,7 +714,7 @@ async function main() {
     await autoAuthorize(
       authData.verificationUriComplete,
       args.email,
-      'admin123456aA!',  // 固定密码
+      registrationPassword,
       args.refreshToken,
       args.clientId
     )

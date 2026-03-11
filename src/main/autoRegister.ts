@@ -217,7 +217,7 @@ async function humanMouseMove(page: Page, targetX: number, targetY: number) {
 /**
  * 人性化点击（带随机延迟和鼠标移动）
  */
-async function humanClick(page: Page, selector: string, description: string = '元素'): Promise<boolean> {
+async function humanClick(page: Page, selector: string, _description: string = '元素'): Promise<boolean> {
   try {
     const element = page.locator(selector).first()
     await element.waitFor({ state: 'visible', timeout: 10000 })
@@ -251,7 +251,7 @@ async function humanClick(page: Page, selector: string, description: string = '�
 /**
  * 人性化输入文本（每个字符随机延迟）
  */
-async function humanType(page: Page, selector: string, text: string, description: string = '文本'): Promise<boolean> {
+async function humanType(page: Page, selector: string, text: string, _description: string = '文本'): Promise<boolean> {
   try {
     const element = page.locator(selector).first()
     await element.waitFor({ state: 'visible', timeout: 10000 })
@@ -479,7 +479,6 @@ export async function getOutlookVerificationCode(
 ): Promise<string | null> {
   log('========== 开始获取邮箱验证码 ==========')
   log(`client_id: ${clientId}`)
-  log(`refresh_token: ${refreshToken.substring(0, 30)}...`)
 
   const startTime = Date.now()
   const checkInterval = 5000 // 5秒检查一次
@@ -1260,6 +1259,7 @@ export async function activateOutlook(
  * @param backupEmail 备用邮箱（用于 Outlook 安全验证）
  * @param backupEmailRefreshToken 备用邮箱的 refresh token
  * @param backupEmailClientId 备用邮箱的 client ID
+ * @param registrationPassword Builder ID 注册密码（来自环境变量）
  */
 export async function autoRegisterAWS(
   email: string,
@@ -1271,9 +1271,13 @@ export async function autoRegisterAWS(
   proxyUrl?: string,
   backupEmail?: string,
   backupEmailRefreshToken?: string,
-  backupEmailClientId?: string
+  backupEmailClientId?: string,
+  registrationPassword?: string
 ): Promise<{ success: boolean; ssoToken?: string; name?: string; error?: string }> {
-  const password = 'admin123456aA!'
+  const password = registrationPassword?.trim()
+  if (!password) {
+    throw new Error('Missing required AWS_REGISTER_PASSWORD configuration')
+  }
   const randomName = generateRandomName()
   let browser: Browser | null = null
   let page: Page | null = null
@@ -1302,7 +1306,6 @@ export async function autoRegisterAWS(
   log('========== 开始 AWS Builder ID 注册 ==========')
   log(`邮箱: ${email}`)
   log(`姓名: ${randomName}`)
-  log(`密码: ${password}`)
   if (proxyUrl) {
     log(`代理: ${proxyUrl}`)
   }
