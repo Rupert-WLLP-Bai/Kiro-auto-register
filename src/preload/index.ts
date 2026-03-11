@@ -522,6 +522,11 @@ const api = {
     return ipcRenderer.invoke('delete-kiro-steering-file', filename)
   },
 
+  // 写入文件到当前目录
+  writeFile: (filename: string, content: string): Promise<{ success: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('write-file', filename, content)
+  },
+
   // ============ MCP 服务器管理 ============
 
   // 保存 MCP 服务器配置

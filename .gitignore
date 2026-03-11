@@ -5,3 +5,39 @@ out
 .eslintcache
 *.log*
 electron-v*.zip
+
+# 敏感数据文件
+ids.txt
+ids_cleaned.txt
+kiro-accounts-*.txt
+gen.txt
+
+# 调试文件
+aiclient-debug-*.png
+*.png
+
+# 测试脚本
+test_*.py
+decode_jwt.py
+
+# 配置文件（如果包含敏感信息）
+configs/
+.env
+.env.local
+# 账号数据文件（包含敏感信息）
+*.txt
+!README.md
+!LICENSE
+
+# 状态文件
+.parallel-register-state.json
+*.json.tmp
+
+# 构建输出
+out/
+dist/
+
+# 截图和临时文件
+*.png
+*.jpg
+*.jpeg

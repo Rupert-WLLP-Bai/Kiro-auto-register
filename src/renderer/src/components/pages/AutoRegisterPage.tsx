@@ -1,13 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { 
-  Play, 
-  Square, 
-  Upload, 
-  Trash2, 
-  Copy, 
-  CheckCircle, 
-  XCircle, 
-  Clock, 
+import {
+  Play,
+  Square,
+  Upload,
+  Trash2,
+  Copy,
+  CheckCircle,
+  XCircle,
+  Clock,
   Loader2,
   Mail,
   Key,
